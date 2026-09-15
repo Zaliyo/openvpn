@@ -21,25 +21,28 @@ fi
 mkdir -p "${EASYRSA_PKI}"
 cd "${EASYRSA_PKI}"
 
+# Use the easyrsa executable from bin (already in PATH)
+EASYRSA_BIN="/usr/local/bin/easyrsa"
+
 # Step 1: Initialize PKI
 echo "📋 Step 1: Initializing PKI directory structure..."
-"${EASYRSA}" init-pki
+"${EASYRSA_BIN}" init-pki
 
 # Step 2: Build CA
 echo "📋 Step 2: Building Certificate Authority (CA)..."
-"${EASYRSA}" build-ca nopass
+"${EASYRSA_BIN}" build-ca nopass
 
 # Step 3: Generate server request
 echo "📋 Step 3: Generating server certificate request..."
-"${EASYRSA}" gen-req server nopass
+"${EASYRSA_BIN}" gen-req server nopass
 
 # Step 4: Sign server certificate
 echo "📋 Step 4: Signing server certificate..."
-"${EASYRSA}" sign-req server server
+"${EASYRSA_BIN}" sign-req server server
 
 # Step 5: Generate Diffie-Hellman parameters
 echo "📋 Step 5: Generating Diffie-Hellman parameters (this may take a moment)..."
-"${EASYRSA}" gen-dh
+"${EASYRSA_BIN}" gen-dh
 
 # Step 6: Generate TLS-Crypt static key
 echo "📋 Step 6: Generating TLS-Crypt key..."
