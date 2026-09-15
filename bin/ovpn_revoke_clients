@@ -13,6 +13,15 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
+# EasyRSA does NOT infer its PKI location from the current directory -
+# it resolves EASYRSA_PKI from $EASYRSA/pki by default (EasyRSA's own
+# install dir), not from cwd. Without exporting this explicitly,
+# EASYRSA_TEMP_DIR (which defaults to EASYRSA_PKI) points at a
+# directory that doesn't exist, its temp-session setup gets silently
+# skipped, and the first easyrsa_mktemp call dies with:
+#   "easyrsa_mktemp - Temporary session undefined (--tmp-dir)"
+export EASYRSA_PKI="/etc/openvpn/pki"
+export EASYRSA="/usr/local/easyrsa/easyrsa3"
 cd /etc/openvpn/pki
 
 for CLIENT in "$@"; do
