@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to check server status
+
+exec /usr/local/bin/ovpn_status "$@"

@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to revoke VPN client certificates
+
+exec /usr/local/bin/ovpn_revoke_clients "$@"

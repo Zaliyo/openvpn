@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to backup PKI
+
+exec /usr/local/bin/ovpn_backup_pki "$@"

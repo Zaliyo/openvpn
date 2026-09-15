@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to create VPN clients
+
+exec /usr/local/bin/ovpn_create_clients "$@"

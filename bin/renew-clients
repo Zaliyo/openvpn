@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to renew client certificates
+
+exec /usr/local/bin/ovpn_renew_clients "$@"

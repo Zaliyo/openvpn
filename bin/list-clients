@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper script to list VPN clients
+
+exec /usr/local/bin/ovpn_list_clients "$@"

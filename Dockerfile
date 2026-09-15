@@ -132,7 +132,15 @@ RUN mkdir -p /install/etc/openvpn /install/var/log/openvpn /install/usr/local/bi
 COPY bin/ /install/usr/local/bin/
 
 # Make scripts executable in builder
-RUN chmod +x /install/usr/local/bin/ovpn_* && chmod +x /install/usr/local/bin/entrypoint.sh
+RUN chmod +x /install/usr/local/bin/ovpn_* && \
+    chmod +x /install/usr/local/bin/entrypoint.sh && \
+    chmod +x /install/usr/local/bin/init-pki && \
+    chmod +x /install/usr/local/bin/create-clients && \
+    chmod +x /install/usr/local/bin/revoke-clients && \
+    chmod +x /install/usr/local/bin/list-clients && \
+    chmod +x /install/usr/local/bin/status && \
+    chmod +x /install/usr/local/bin/renew-clients && \
+    chmod +x /install/usr/local/bin/backup-pki
 
 # ============================================================================
 # Stage 2: Runtime image - minimal Debian with only essential packages

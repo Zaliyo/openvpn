@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper script to initialize PKI
+# Calls the convenience script with proper environment
+
+exec /usr/local/bin/ovpn_init_pki "$@"
