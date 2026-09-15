@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Create new VPN client certificates
+# Create new VPN client certificates and matching .ovpn connection files
 # Usage: ovpn_create_clients <client-name> [additional-client-names...]
 
 if [ $# -eq 0 ]; then
@@ -24,24 +24,103 @@ export EASYRSA_PKI="/etc/openvpn/pki"
 export EASYRSA="/usr/local/easyrsa/easyrsa3"
 cd /etc/openvpn/pki
 
+# Where finished .ovpn files go. Not every deployment mounts this to a
+# host directory (the source repo's own local docker-compose.yml
+# doesn't), so create it defensively - worst case it just lives inside
+# the container until the next `docker cp`.
+USERS_DIR="/opt/users"
+mkdir -p "$USERS_DIR"
+
+# Server endpoint clients should connect to. Comes from the .env file
+# (loaded into the container via docker-compose's env_file:). If it's
+# missing, still produce a usable file rather than silently emitting a
+# broken `remote` line - just make it obvious what needs editing.
+SERVER_HOST="${VPN_IP:-}"
+SERVER_PORT="${VPN_PORT:-1194}"
+if [ -z "$SERVER_HOST" ]; then
+    echo "⚠️  VPN_IP is not set in .env - using a placeholder in the generated .ovpn file(s)."
+    echo "   Edit .env, set VPN_IP to this server's public IP or hostname, and re-run"
+    echo "   create-clients (or just replace the 'remote' line in the .ovpn file by hand)."
+    SERVER_HOST="YOUR_SERVER_IP_OR_HOSTNAME"
+fi
+
+# Build one client's .ovpn from its issued cert/key plus the CA and
+# tls-crypt key, matching the ciphers/TLS settings used server-side in
+# conf/openvpn.conf.default.
+build_ovpn_file() {
+    client="$1"
+    out_file="${USERS_DIR}/${client}.ovpn"
+
+    ca_crt="${EASYRSA_PKI}/ca.crt"
+    client_crt="${EASYRSA_PKI}/issued/${client}.crt"
+    client_key="${EASYRSA_PKI}/private/${client}.key"
+    ta_key="${EASYRSA_PKI}/ta.key"
+
+    for f in "$ca_crt" "$client_crt" "$client_key" "$ta_key"; do
+        [ -f "$f" ] || { echo "❌ ERROR: expected file missing: $f"; return 1; }
+    done
+
+    {
+        echo "client"
+        echo "dev tun"
+        echo "proto udp"
+        echo "remote ${SERVER_HOST} ${SERVER_PORT}"
+        echo "resolv-retry infinite"
+        echo "nobind"
+        echo "persist-key"
+        echo "persist-tun"
+        echo "remote-cert-tls server"
+        echo "cipher AES-256-GCM"
+        echo "auth SHA256"
+        echo "tls-version-min 1.2"
+        echo "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305"
+        echo "data-ciphers-fallback AES-256-GCM"
+        echo "verb 3"
+        echo "mute 20"
+        echo ""
+        echo "<ca>"
+        cat "$ca_crt"
+        echo "</ca>"
+        echo ""
+        echo "<cert>"
+        # issued/<client>.crt is openssl's `-text` dump followed by the
+        # actual PEM block - inline configs only want the PEM block.
+        sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "$client_crt"
+        echo "</cert>"
+        echo ""
+        echo "<key>"
+        cat "$client_key"
+        echo "</key>"
+        echo ""
+        echo "<tls-crypt>"
+        cat "$ta_key"
+        echo "</tls-crypt>"
+    } > "$out_file"
+
+    chmod 600 "$out_file"
+}
+
 for CLIENT in "$@"; do
     echo "📝 Generating certificate request for client: $CLIENT"
-    
+
     # Generate key and request
     /usr/local/bin/easyrsa --batch gen-req "$CLIENT" nopass
-    
+
     echo "✍️  Signing certificate for client: $CLIENT"
-    
+
     # Sign certificate
     /usr/local/bin/easyrsa --batch --no-inline sign-req client "$CLIENT"
-    
-    echo "✅ Client certificate created: $CLIENT"
+
+    echo "📦 Building ${CLIENT}.ovpn..."
+    build_ovpn_file "$CLIENT"
+
+    echo "✅ Client created: $CLIENT -> ${USERS_DIR}/${CLIENT}.ovpn"
 done
 
 echo ""
 echo "✅ All client certificates created successfully"
 echo ""
-echo "Client files location: /etc/openvpn/pki/issued/ and /etc/openvpn/pki/private/"
-echo "To retrieve client configurations, use:"
-echo "  docker cp openvpn:/etc/openvpn/pki/issued/\$CLIENT.crt ."
-echo "  docker cp openvpn:/etc/openvpn/pki/private/\$CLIENT.key ."
+echo "Client .ovpn files: ${USERS_DIR}/"
+echo "To retrieve a client config from the host, use:"
+echo "  docker cp openvpn:${USERS_DIR}/\$CLIENT.ovpn ."
+echo "(or, if this deployment mounts ${USERS_DIR} to a host directory, it's already there)"
