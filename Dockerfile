@@ -160,11 +160,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     netcat-openbsd \
     && apt-get purge -y --allow-remove-essential perl perl-modules-5.36 perl-base \
+    && apt-get purge -y --allow-remove-essential openssl libssl3 \
     && apt-get autoremove -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && rm -rf /etc/perl /usr/lib/perl* /usr/share/perl* \
+    && rm -rf /etc/ssl /usr/lib/ssl \
     && grep -v "^perl" /var/lib/dpkg/status > /var/lib/dpkg/status.new && mv /var/lib/dpkg/status.new /var/lib/dpkg/status \
-    && sed -i '/^Package: perl/,/^$/d' /var/lib/dpkg/status
+    && sed -i '/^Package: perl/,/^$/d' /var/lib/dpkg/status \
+    && sed -i '/^Package: openssl/,/^$/d' /var/lib/dpkg/status \
+    && sed -i '/^Package: libssl/,/^$/d' /var/lib/dpkg/status
 
 # Copy everything pre-built from builder stage
 COPY --from=builder /install/ /
@@ -175,8 +179,13 @@ COPY openvpn-data/conf/openvpn.conf /etc/openvpn/openvpn.conf
 # Setup OpenVPN runtime environment
 RUN mkdir -p /etc/openvpn /var/log/openvpn && \
     chmod 755 /etc/openvpn /var/log/openvpn && \
-    echo "/usr/local/lib" >> /etc/ld.so.conf.d/openvpn.conf && \
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/openvpn-openssl.conf && \
+    echo "/usr/local/lib64" >> /etc/ld.so.conf.d/openvpn-openssl.conf && \
     ldconfig
+
+# Set environment to use compiled OpenSSL
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:$LD_LIBRARY_PATH
+ENV OPENSSL_DIR=/usr/local
 
 # Use entrypoint script with command routing
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
