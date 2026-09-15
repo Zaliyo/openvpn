@@ -177,7 +177,7 @@ RUN mkdir -p /etc/openvpn /var/log/openvpn && \
     ldconfig
 
 # Set environment to use compiled OpenSSL
-ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64
 ENV OPENSSL_DIR=/usr/local
 
 # Use entrypoint script with command routing
