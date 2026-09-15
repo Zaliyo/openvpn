@@ -176,7 +176,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     iproute2 \
     iptables \
     netcat-openbsd \
-    && apt-get purge -y --allow-remove-essential perl perl-modules-5.36 perl-base \
+    && apt-get purge -y --allow-remove-essential perl perl-base perl-modules* 2>/dev/null || true \
     && apt-get autoremove -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && rm -rf /etc/perl /usr/lib/perl* /usr/share/perl* \
