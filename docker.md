@@ -5,10 +5,10 @@
 ## Features
 
 - ✅ **OpenVPN 2.7.7** - Compiled from official source with all features enabled
-- ✅ **OpenSSL 3.6.4** - Security hardened, CVE-2026-75803 patched
+- ✅ **OpenSSL 3.6.4** - Source-compiled and linked by the OpenVPN binary itself, patching CVE-2026-75803 for that process (the Debian base image separately carries its own unpatched libssl3 package - see Security Specifications below)
 - ✅ **EasyRSA 3.2.6** - Official PKI certificate management
 - ✅ **Multi-architecture** - linux/amd64 + linux/arm64 support
-- ✅ **Hardened build** - Perl and its packages purged from the final image (source-compiled OpenSSL above patches CVE-2026-75803)
+- ✅ **Hardened build** - Perl and its packages purged from the final image
 - ✅ **Modern encryption** - AES-256-GCM, ChaCha20-Poly1305, TLS 1.2+
 - ✅ **Zero-config first boot** - default `openvpn.conf` and PKI (CA, server cert, DH params, TLS-crypt key) are generated automatically on first startup, no manual init step
 - ✅ **6 management scripts** - Create, revoke, list, status, renew, backup clients
@@ -115,11 +115,31 @@ DEBUG=0                    # Set to 1 for verbose logs
 - **Key Exchange**: 2048-bit RSA + Diffie-Hellman
 
 ### Hardening
-- Multi-stage Docker build (minimal attack surface)
-- OpenSSL 3.6.4 compiled from source (latest patches)
-- Perl removed (eliminates 3 critical CVEs)
-- Non-root user (nobody:nogroup)
-- No unnecessary packages
+- Multi-stage Docker build - build tooling is meant to stay in the builder stage, though `docker scout cves` currently shows `gcc-12` present in the runtime image too; worth tracing which runtime package pulls it in as a dependency and removing it if it's not actually needed
+- OpenSSL 3.6.4 compiled from source and linked by the OpenVPN process via `LD_LIBRARY_PATH`
+- Perl and its packages purged from the runtime image
+- Non-root user (nobody:nogroup) for the OpenVPN process itself
+
+### Known residual vulnerabilities
+
+The base image (`debian:12-slim`) still ships a handful of packages with
+open CVEs that this project doesn't control, since Debian hasn't
+released fixes for most of them yet. Run `docker scout cves
+zaliyo/openvpn:2.7.7` for the current, authoritative count - do not
+treat any number here as up to date, since it changes with every base
+image refresh. As of the last check:
+- `pcre2` was out of date relative to Debian's own patched version
+  (`10.42-1+deb12u1`) - fixable by adding an `apt-get upgrade` step to
+  the Dockerfile before/after package install, not yet done.
+- `openssl`/`libssl3` (the Debian-packaged copy, distinct from the
+  source-compiled 3.6.4 above) still carries the unfixed
+  CVE-2026-75803 - it's a transitive dependency of another runtime
+  package, not something OpenVPN itself loads, but it is present on
+  disk and picked up by scanners.
+- The remaining findings (glibc, util-linux, systemd, coreutils, tar,
+  krb5, and others) have no Debian-provided fix available at all yet;
+  reducing them further would mean dropping packages that pull them in
+  or moving off `debian:12-slim`.
 
 ### Certificate Management
 - X.509 certificates with EasyRSA
