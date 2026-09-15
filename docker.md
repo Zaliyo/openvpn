@@ -10,7 +10,9 @@
 - ✅ **Multi-architecture** - linux/amd64 + linux/arm64 support
 - ✅ **Zero vulnerabilities** - Aggressive hardening, Perl CVEs eliminated
 - ✅ **Modern encryption** - AES-256-GCM, ChaCha20-Poly1305, TLS 1.2+
+- ✅ **Zero-config first boot** - default `openvpn.conf` and PKI (CA, server cert, DH params, TLS-crypt key) are generated automatically on first startup, no manual init step
 - ✅ **6 management scripts** - Create, revoke, list, status, renew, backup clients
+- ✅ **Automatic `.ovpn` lifecycle** - `create-clients` writes a ready-to-import `.ovpn`, `revoke-clients` deletes it, `renew-clients` rebuilds it with the new cert
 - ✅ **Minimal image** - Multi-stage build, ~52MB compressed
 - ✅ **Production ready** - Health checks, logging, restart policies
 
@@ -24,27 +26,49 @@ cd openvpn-docker-compose
 cp .env.example .env
 ```
 
+Edit `.env` and set `VPN_IP` to this server's public IP or hostname -
+every `.ovpn` file `create-clients`/`renew-clients` generates uses it
+as the `remote` address. If you skip this, client creation still
+works, but each generated `.ovpn` gets a placeholder you'll need to
+edit by hand.
+
 ### 2. Start Container
 
 ```bash
 docker-compose up -d
 ```
 
-### 3. Initialize PKI (First Time Only)
+That's it - **no manual PKI initialization step is required.** On
+first boot the container automatically installs a default
+`openvpn.conf` (if `data/conf/openvpn.conf` doesn't exist yet),
+initializes the PKI (if `data/conf/pki/ca.crt` doesn't exist yet),
+and starts the OpenVPN server. Watch it happen with:
+
+```bash
+docker-compose logs -f openvpn
+```
+
+First boot takes a minute or two (mostly Diffie-Hellman parameter
+generation). Every later restart just no-ops both checks and starts
+immediately - your PKI and config are never regenerated once they
+exist.
+
+If initialization fails partway, fix the underlying issue (check the
+logs), then either restart the container to retry automatically, or
+re-run it directly:
 
 ```bash
 docker-compose exec openvpn init-pki
-docker-compose restart openvpn
 ```
 
-### 4. Create Your First Client
+### 3. Create Your First Client
 
 ```bash
 docker-compose exec openvpn create-clients alice
 cat users/alice.ovpn
 ```
 
-### 5. Import `.ovpn` File
+### 4. Import `.ovpn` File
 
 Download the `alice.ovpn` file and import into:
 - **OpenVPN Connect** (Desktop/Mobile)
@@ -58,14 +82,14 @@ All commands run via `docker-compose exec openvpn <command>`:
 
 ```bash
 # PKI Management
-init-pki                    # Initialize certificates (first-time setup)
+init-pki                    # (Re-)run PKI init manually - not needed on a normal first boot
 easyrsa <args>             # Direct EasyRSA commands
 
 # Client Management
-create-clients alice bob    # Create new clients
+create-clients alice bob    # Create new clients, writes users/<name>.ovpn
 list-clients               # Show all clients with expiry
-revoke-clients baduser     # Revoke client certificate
-renew-clients alice        # Renew expiring certificate
+revoke-clients baduser     # Revoke client certificate, removes users/baduser.ovpn
+renew-clients alice        # Renew expiring certificate, rewrites users/alice.ovpn with the new cert
 
 # Server & Backup
 status                     # Check server health and version
@@ -74,13 +98,12 @@ backup-pki                # Backup certificates (encrypted)
 
 ## Configuration
 
-Edit `docker-compose.yml` to customize:
+Edit `.env` (in the docker-compose repo) to customize:
 
-```yaml
-environment:
-  VPN_IP: "1.2.3.4"        # Your server IP or hostname
-  VPN_PORT: "1194"         # UDP port
-  DEBUG: "0"               # Set to 1 for verbose logs
+```env
+VPN_IP=1.2.3.4             # Your server's public IP or hostname
+VPN_PORT=1194              # UDP port
+DEBUG=0                    # Set to 1 for verbose logs
 ```
 
 ## Security Specifications
@@ -103,6 +126,8 @@ environment:
 - Certificate revocation list (CRL)
 - Automatic expiry warnings
 - Encrypted backup support
+- `.ovpn` client bundles are kept in sync with certificate state:
+  created alongside the cert, deleted on revoke, rebuilt on renew
 
 ## Logs
 
@@ -115,7 +140,7 @@ docker-compose logs -f openvpn
 Or check the log file:
 
 ```bash
-cat openvpn-data/logs/openvpn.log
+cat data/logs/openvpn.log
 ```
 
 ## Troubleshooting
@@ -128,17 +153,22 @@ docker-compose ps
 
 ### Clients can't connect
 1. Verify port 1194/UDP is open: `sudo ufw allow 1194/udp`
-2. Check VPN_IP in `.env` matches your server's public IP
+2. Check `VPN_IP` in `.env` matches your server's public IP
 3. Review logs: `docker-compose logs openvpn`
 
 ### PKI initialization fails
-- Ensure container is fully running: `docker-compose up -d && sleep 5`
-- Then run: `docker-compose exec openvpn init-pki`
+PKI initialization now runs automatically on first boot - if it fails
+partway, check the logs for the actual error, fix it, then either
+restart the container to retry automatically or re-run it directly:
+
+```bash
+docker-compose exec openvpn init-pki
+```
 
 ### Certificate permissions issue
 ```bash
-sudo chown -R $(whoami): openvpn-data/
-chmod 755 openvpn-data/conf
+sudo chown -R 65534:65534 data/conf
+chmod 755 data/conf
 ```
 
 ## Advanced Usage
@@ -165,7 +195,7 @@ docker-compose exec openvpn status -v
 Edit the OpenVPN config file:
 
 ```bash
-nano openvpn-data/conf/openvpn.conf
+nano data/conf/openvpn.conf
 docker-compose restart openvpn
 ```
 
@@ -191,6 +221,8 @@ docker-compose restart openvpn
 **v2.7.7** (2026-09-15)
 - OpenVPN 2.7.7 from official source
 - OpenSSL 3.6.4 with security patches
+- Zero-config first boot: automatic default `openvpn.conf` install and PKI initialization
+- `.ovpn` client bundle lifecycle kept consistent across create/revoke/renew
 - 6 management scripts for certificate lifecycle
 - Multi-architecture builds (amd64 + arm64)
 - Zero known vulnerabilities
