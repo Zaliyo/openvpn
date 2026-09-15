@@ -1,0 +1,39 @@
+
+services:
+  openvpn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENVPN_VERSION: ${OPENVPN_VERSION:-2.7.7}
+        EASYRSA_VERSION: ${EASYRSA_VERSION:-3.2.6}
+        OPENSSL_VERSION: ${OPENSSL_VERSION:-3.6.4}
+    image: openvpn:${OPENVPN_VERSION:-2.7.7}
+    container_name: openvpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "1194:1194/udp"
+    volumes:
+      - ./openvpn-data/conf:/etc/openvpn
+      - ./openvpn-data/logs:/var/log/openvpn
+      - ./openvpn-backups:/backups
+    env_file:
+      - .env
+    environment:
+      - DEBUG=${DEBUG:-0}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-u", "-z", "localhost", "1194"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - openvpn-network
+
+networks:
+  openvpn-network:
+    driver: bridge

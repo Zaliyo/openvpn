@@ -1,0 +1,70 @@
+#!/bin/bash
+# ovpn_initpki - Initialize OpenVPN PKI infrastructure
+# Creates CA, server certificate, and TLS key
+
+set -e
+
+OPENVPN_DIR="${OPENVPN_DIR:-/etc/openvpn}"
+EASYRSA_DIR="${OPENVPN_DIR}/easy-rsa"
+EASYRSA_PKI="${OPENVPN_DIR}/pki"
+
+echo "=========================================="
+echo "OpenVPN PKI Initialization"
+echo "=========================================="
+echo ""
+
+# Create easy-rsa working directory
+mkdir -p "${EASYRSA_DIR}"
+cd "${EASYRSA_DIR}"
+
+# Initialize PKI if not already done
+if [[ ! -f "${EASYRSA_PKI}/ca.crt" ]]; then
+    echo "Initializing PKI structure..."
+    /usr/local/bin/easyrsa --batch init-pki
+    
+    echo ""
+    echo "Building CA certificate..."
+    # Build CA - using batch mode (no passphrase) for automation
+    # In production, consider adding passphrase
+    /usr/local/bin/easyrsa --batch --req-cn="OpenVPN-CA" --nopass build-ca
+    
+    echo ""
+    echo "Building server certificate..."
+    /usr/local/bin/easyrsa --batch --nopass --days=3650 build-server-full server
+    
+    echo ""
+    echo "Building DH parameters (this may take a minute)..."
+    /usr/local/bin/easyrsa gen-dh
+    
+    echo ""
+    echo "Generating TLS authentication key..."
+    /usr/local/sbin/openvpn --genkey tls-crypt "${EASYRSA_PKI}/ta.key"
+    
+    # Create CRL (Certificate Revocation List)
+    echo ""
+    echo "Generating Certificate Revocation List..."
+    /usr/local/bin/easyrsa gen-crl
+    
+    echo ""
+    echo "✓ PKI initialized successfully!"
+    echo ""
+    echo "Generated files:"
+    echo "  • CA Certificate: ${EASYRSA_PKI}/ca.crt"
+    echo "  • Server Certificate: ${EASYRSA_PKI}/issued/server.crt"
+    echo "  • Server Key: ${EASYRSA_PKI}/private/server.key"
+    echo "  • Diffie-Hellman: ${EASYRSA_PKI}/dh.pem"
+    echo "  • TLS Auth Key: ${EASYRSA_PKI}/ta.key"
+    echo "  • CRL: ${EASYRSA_PKI}/crl.pem"
+    echo ""
+    echo "Security recommendation:"
+    echo "  Consider backing up ${EASYRSA_PKI}/private/ directory"
+    
+else
+    echo "✓ PKI already initialized"
+    echo "CA Certificate: ${EASYRSA_PKI}/ca.crt"
+    echo "Server Certificate: ${EASYRSA_PKI}/issued/server.crt"
+    echo "Server Key: ${EASYRSA_PKI}/private/server.key"
+fi
+
+echo ""
+echo "Next step: Run 'docker-compose up -d openvpn' to start the server"

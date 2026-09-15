@@ -1,0 +1,7 @@
+*.ovpn
+.env
+*.log
+openvpn-*
+.DS_Store
+source/*.tar.gz
+*backups

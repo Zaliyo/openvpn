@@ -1,0 +1,60 @@
+#!/bin/bash
+# ovpn_revokeclient - Revoke client certificate
+# Usage: ovpn_revokeclient <clientname> [remove]
+
+set -e
+
+if [[ -z "$1" ]]; then
+    echo "Usage: $0 <clientname> [remove]"
+    echo ""
+    echo "Revoke a client certificate. Add 'remove' to also delete certificate files."
+    echo ""
+    echo "Examples:"
+    echo "  docker-compose run --rm openvpn ovpn_revokeclient alice"
+    echo "  docker-compose run --rm openvpn ovpn_revokeclient alice remove"
+    exit 1
+fi
+
+CLIENTNAME="$1"
+REMOVE_FILES="${2:-}"
+OPENVPN_DIR="${OPENVPN_DIR:-/etc/openvpn}"
+EASYRSA_DIR="${OPENVPN_DIR}/easy-rsa"
+EASYRSA_PKI="${OPENVPN_DIR}/pki"
+
+# Change to easy-rsa directory
+cd "${EASYRSA_DIR}"
+
+# Validate client certificate exists
+if [[ ! -f "${EASYRSA_PKI}/issued/${CLIENTNAME}.crt" ]]; then
+    echo "ERROR: Client certificate not found: ${EASYRSA_PKI}/issued/${CLIENTNAME}.crt"
+    exit 1
+fi
+
+echo "Revoking certificate for client: ${CLIENTNAME}"
+
+# Revoke the certificate
+/usr/local/bin/easyrsa --batch revoke "${CLIENTNAME}"
+
+# Generate new CRL
+echo "Updating Certificate Revocation List..."
+/usr/local/bin/easyrsa gen-crl
+
+if [[ "${REMOVE_FILES}" == "remove" ]]; then
+    echo "Removing certificate files..."
+    rm -f "${EASYRSA_PKI}/issued/${CLIENTNAME}.crt"
+    rm -f "${EASYRSA_PKI}/private/${CLIENTNAME}.key"
+    rm -f "${EASYRSA_PKI}/reqs/${CLIENTNAME}.req"
+    echo "✓ Client certificate revoked and files removed"
+else
+    echo "✓ Client certificate revoked"
+    echo ""
+    echo "Certificate files retained at:"
+    echo "  • ${EASYRSA_PKI}/issued/${CLIENTNAME}.crt"
+    echo "  • ${EASYRSA_PKI}/private/${CLIENTNAME}.key"
+    echo ""
+    echo "To remove these files, run: ovpn_revokeclient ${CLIENTNAME} remove"
+fi
+
+echo ""
+echo "CRL updated at: ${EASYRSA_PKI}/crl.pem"
+echo "Client cannot connect anymore."
