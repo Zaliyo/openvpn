@@ -69,7 +69,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: ${{ secrets.DOCKER_USERNAME }}/openvpn
           short-description: Production-ready OpenVPN ${{ steps.meta.outputs.version }} server with EasyRSA & 6 management scripts
-          readme-filepath: ./docker-compose/docker-hub-repo-descreption.md
+          readme-filepath: ./docker.md
 
       - name: Build summary
         run: |
