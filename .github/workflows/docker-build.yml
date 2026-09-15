@@ -35,11 +35,13 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Extract metadata
+      - name: Extract version from Dockerfile
         id: meta
         run: |
-          echo "version=2.7.7" >> $GITHUB_OUTPUT
+          OPENVPN_VERSION=$(grep "^ARG OPENVPN_VERSION=" Dockerfile | cut -d'=' -f2)
+          echo "version=${OPENVPN_VERSION}" >> $GITHUB_OUTPUT
           echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+          echo "Extracted OpenVPN version: ${OPENVPN_VERSION}"
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v5
@@ -48,11 +50,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/openvpn:2.7.7
+            ${{ secrets.DOCKER_USERNAME }}/openvpn:${{ steps.meta.outputs.version }}
             ${{ secrets.DOCKER_USERNAME }}/openvpn:latest
           labels: |
             org.opencontainers.image.title=OpenVPN
-            org.opencontainers.image.description=Production-ready OpenVPN 2.7.7 with EasyRSA and OpenSSL 3.6.4
+            org.opencontainers.image.description=Production-ready OpenVPN ${{ steps.meta.outputs.version }} with EasyRSA and OpenSSL 3.6.4
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
             org.opencontainers.image.created=${{ steps.meta.outputs.timestamp }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -66,12 +68,12 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: ${{ secrets.DOCKER_USERNAME }}/openvpn
-          short-description: Production-ready OpenVPN 2.7.7 server with EasyRSA & 6 management scripts
+          short-description: Production-ready OpenVPN ${{ steps.meta.outputs.version }} server with EasyRSA & 6 management scripts
           description: |
-            # OpenVPN 2.7.7 Production Server
+            # OpenVPN ${{ steps.meta.outputs.version }} Production Server
 
             ## Features
-            - **OpenVPN 2.7.7** - Built from official source
+            - **OpenVPN ${{ steps.meta.outputs.version }}** - Built from official source
             - **OpenSSL 3.6.4** - Compiled from source, CVE-2026-75803 patched
             - **EasyRSA 3.2.6** - Automated PKI management
             - **6 Management Scripts** - create-clients, revoke-clients, list-clients, status, renew-clients, backup-pki
@@ -89,7 +91,7 @@ jobs:
               -p 1194:1194/udp \
               -v openvpn-data:/etc/openvpn/pki \
               -v openvpn-logs:/var/log/openvpn \
-              ${{ secrets.DOCKER_USERNAME }}/openvpn:2.7.7
+              ${{ secrets.DOCKER_USERNAME }}/openvpn:${{ steps.meta.outputs.version }}
             ```
 
             ## Security
@@ -109,6 +111,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Image Info" >> $GITHUB_STEP_SUMMARY
           echo "- **Repository:** ${{ secrets.DOCKER_USERNAME }}/openvpn" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tags:** 2.7.7, latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags:** ${{ steps.meta.outputs.version }}, latest" >> $GITHUB_STEP_SUMMARY
           echo "- **Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

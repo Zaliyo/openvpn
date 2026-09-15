@@ -33,6 +33,18 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+# Extract OpenVPN version from Dockerfile
+DOCKERFILE_VERSION=$(grep "^ARG OPENVPN_VERSION=" Dockerfile | cut -d'=' -f2)
+if [ -z "$DOCKERFILE_VERSION" ]; then
+    echo -e "${RED}✗ Could not extract OPENVPN_VERSION from Dockerfile${NC}"
+    exit 1
+fi
+
+# Override with extracted version if not specified
+if [ "$VERSION" = "2.7.7" ]; then
+    VERSION=$DOCKERFILE_VERSION
+fi
+
 # Check if buildx is available
 if ! docker buildx --version &> /dev/null; then
     echo -e "${RED}✗ Docker buildx is not available${NC}"
