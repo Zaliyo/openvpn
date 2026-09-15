@@ -19,7 +19,7 @@ ARG OPENVPN_VERSION
 ARG EASYRSA_VERSION
 ARG OPENSSL_VERSION
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     build-essential \
     autoconf \
     automake \
@@ -166,7 +166,7 @@ LABEL version="${OPENVPN_VERSION}"
 
 # Install ONLY essential runtime packages
 # OpenSSL 3.6.4 comes from builder stage (LD_LIBRARY_PATH prioritizes it)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ca-certificates \
     liblzo2-2 \
     liblz4-1 \
