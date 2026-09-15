@@ -46,7 +46,7 @@ if [ "$VERSION" = "2.7.7" ]; then
 fi
 
 # Check if buildx is available
-if ! docker buildx --version &> /dev/null; then
+if ! docker buildx version &> /dev/null; then
     echo -e "${RED}✗ Docker buildx is not available${NC}"
     echo "  Install it with: docker buildx create --name multiarch --driver docker-container"
     exit 1
