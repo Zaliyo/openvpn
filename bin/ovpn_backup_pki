@@ -1,0 +1,63 @@
+#!/bin/bash
+set -e
+
+# Backup PKI (certificates, keys, CRL) with GPG encryption
+# Usage: ovpn_backup_pki
+
+BACKUP_DIR="/openvpn-backups"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="${BACKUP_DIR}/openvpn-backup-${TIMESTAMP}.tar.gz"
+
+# Check if backup directory exists
+if [ ! -d "$BACKUP_DIR" ]; then
+    echo "⚠️  Backup directory not found: $BACKUP_DIR"
+    echo "   Creating: $BACKUP_DIR"
+    mkdir -p "$BACKUP_DIR"
+fi
+
+# Check if PKI exists
+if [ ! -d "/etc/openvpn/pki" ]; then
+    echo "❌ PKI directory not found: /etc/openvpn/pki"
+    echo "   Initialize PKI first: docker exec openvpn easyrsa init-pki"
+    exit 1
+fi
+
+echo "📦 Creating backup archive..."
+tar -czf "${BACKUP_FILE}" -C /etc/openvpn pki
+
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "❌ Backup creation failed"
+    exit 1
+fi
+
+BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+echo "✅ Backup created: $BACKUP_FILE (${BACKUP_SIZE})"
+
+# Check if GPG is available for encryption
+if command -v gpg &> /dev/null && [ -n "$GPG_PASSPHRASE" ]; then
+    echo "🔐 Encrypting backup with GPG..."
+    
+    # Encrypt file
+    echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+        --symmetric --cipher-algo AES256 \
+        "${BACKUP_FILE}"
+    
+    # Remove unencrypted file
+    rm -f "$BACKUP_FILE"
+    
+    ENCRYPTED_FILE="${BACKUP_FILE}.gpg"
+    ENCRYPTED_SIZE=$(du -h "$ENCRYPTED_FILE" | cut -f1)
+    echo "✅ Encrypted backup: $ENCRYPTED_FILE (${ENCRYPTED_SIZE})"
+    echo ""
+    echo "⚠️  IMPORTANT: Store the GPG passphrase securely!"
+    echo "   You'll need it to restore: GPG_PASSPHRASE=xxx docker exec openvpn restore-pki <file>"
+else
+    echo "⚠️  GPG passphrase not set (GPG_PASSPHRASE env var missing)"
+    echo "   Backup is unencrypted. Consider encrypting it manually:"
+    echo "   gpg --symmetric --cipher-algo AES256 $BACKUP_FILE"
+fi
+
+echo ""
+echo "💡 To restore from backup:"
+echo "   docker cp $BACKUP_FILE openvpn:/tmp/"
+echo "   docker exec openvpn restore-pki /tmp/$(basename $BACKUP_FILE)"
