@@ -62,6 +62,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4.0.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: ${{ secrets.DOCKER_USERNAME }}/openvpn
+          short-description: Production-ready OpenVPN ${{ steps.meta.outputs.version }} server with EasyRSA & 6 management scripts
+          readme-filepath: ./docker-compose/docker-hub-repo-descreption.md
+
       - name: Build summary
         run: |
           echo "## Docker Build Complete ✅" >> $GITHUB_STEP_SUMMARY
