@@ -24,21 +24,37 @@ export EASYRSA_PKI="/etc/openvpn/pki"
 export EASYRSA="/usr/local/easyrsa/easyrsa3"
 cd /etc/openvpn/pki
 
+# build_ovpn_file() and its USERS_DIR/SERVER_HOST/SERVER_PORT setup are
+# shared with ovpn_create_clients - see lib_ovpn_client_bundle.sh so the
+# two scripts can't drift out of sync again.
+. /usr/local/bin/lib_ovpn_client_bundle.sh
+
 for CLIENT in "$@"; do
     if [ ! -f "issued/${CLIENT}.crt" ]; then
         echo "⚠️  Certificate not found for client: $CLIENT"
         continue
     fi
-    
+
     echo "🔄 Renewing certificate for client: $CLIENT"
-    
-    # Renew certificate (revoke old, create new request, sign new)
-    /usr/local/bin/easyrsa --batch renew "$CLIENT" nopass
-    
+
+    # Renew certificate (revoke old, create new request, sign new).
+    # --no-inline matches the flag used everywhere else certs are
+    # signed - without it EasyRSA also (uselessly, for this project)
+    # writes an inline bundle under pki/inline/ and warns about a
+    # missing TLS key.
+    /usr/local/bin/easyrsa --batch --no-inline renew "$CLIENT" nopass
+
     echo "✅ Client certificate renewed: $CLIENT"
+
+    # The old .ovpn embeds the now-revoked cert/key inline - rebuild it
+    # from the freshly issued cert so users/ never holds a stale,
+    # no-longer-valid connection file after a renewal.
+    echo "📦 Rebuilding ${CLIENT}.ovpn with the renewed certificate..."
+    build_ovpn_file "$CLIENT"
 done
 
 echo ""
 echo "✅ All client certificates renewed successfully"
 echo ""
 echo "💡 Tip: Clients will need to restart their VPN connections to use the new certificate"
+echo "💡 Updated .ovpn files are in ${OVPN_USERS_DIR}/"

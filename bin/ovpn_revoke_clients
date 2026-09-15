@@ -24,6 +24,9 @@ export EASYRSA_PKI="/etc/openvpn/pki"
 export EASYRSA="/usr/local/easyrsa/easyrsa3"
 cd /etc/openvpn/pki
 
+# Matches the path create-clients writes .ovpn bundles to.
+USERS_DIR="/opt/users"
+
 for CLIENT in "$@"; do
     if [ ! -f "issued/${CLIENT}.crt" ]; then
         echo "⚠️  Certificate not found for client: $CLIENT"
@@ -36,6 +39,15 @@ for CLIENT in "$@"; do
     /usr/local/bin/easyrsa --batch revoke "$CLIENT"
     
     echo "✅ Client revoked: $CLIENT"
+
+    # The .ovpn file embeds this client's now-revoked cert/key inline -
+    # remove it so a stale, no-longer-valid connection file doesn't
+    # linger in users/ looking usable.
+    ovpn_file="${USERS_DIR}/${CLIENT}.ovpn"
+    if [ -f "$ovpn_file" ]; then
+        rm -f "$ovpn_file"
+        echo "🗑️  Removed ${ovpn_file}"
+    fi
 done
 
 echo ""
