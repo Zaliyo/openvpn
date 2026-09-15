@@ -169,6 +169,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy everything pre-built from builder stage
 COPY --from=builder /install/ /
 
+# Copy default OpenVPN configuration
+COPY openvpn-data/conf/openvpn.conf /etc/openvpn/openvpn.conf
+
 # Setup OpenVPN runtime environment
 RUN mkdir -p /etc/openvpn /var/log/openvpn && \
     chmod 755 /etc/openvpn /var/log/openvpn && \
