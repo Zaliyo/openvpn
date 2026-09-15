@@ -29,11 +29,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract version from Dockerfile
         id: meta
@@ -50,8 +51,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/openvpn:${{ steps.meta.outputs.version }}
-            ${{ secrets.DOCKER_USERNAME }}/openvpn:latest
+            ghcr.io/${{ github.repository_owner }}/openvpn:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/openvpn:latest
           labels: |
             org.opencontainers.image.title=OpenVPN
             org.opencontainers.image.description=Production-ready OpenVPN ${{ steps.meta.outputs.version }} with EasyRSA and OpenSSL 3.6.4
@@ -62,55 +63,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: ${{ secrets.DOCKER_USERNAME }}/openvpn
-          short-description: Production-ready OpenVPN ${{ steps.meta.outputs.version }} server with EasyRSA & 6 management scripts
-          description: |
-            # OpenVPN ${{ steps.meta.outputs.version }} Production Server
-
-            ## Features
-            - **OpenVPN ${{ steps.meta.outputs.version }}** - Built from official source
-            - **OpenSSL 3.6.4** - Compiled from source, CVE-2026-75803 patched
-            - **EasyRSA 3.2.6** - Automated PKI management
-            - **6 Management Scripts** - create-clients, revoke-clients, list-clients, status, renew-clients, backup-pki
-            - **Multi-Architecture** - Supports linux/amd64 and linux/arm64
-            - **Audit Logging** - Compliance-ready logging
-            - **Encrypted Backups** - GPG-encrypted backup/restore
-
-            ## Quick Start
-
-            ```bash
-            docker run -d \
-              --name openvpn \
-              --cap-add NET_ADMIN \
-              --device /dev/net/tun \
-              -p 1194:1194/udp \
-              -v openvpn-data:/etc/openvpn/pki \
-              -v openvpn-logs:/var/log/openvpn \
-              ${{ secrets.DOCKER_USERNAME }}/openvpn:${{ steps.meta.outputs.version }}
-            ```
-
-            ## Security
-            - Multi-stage build (minimal runtime image)
-            - Perl removed to eliminate CVEs
-            - OpenSSL 3.6.4 with CVE-2026-75803 patch
-            - ~160 vulnerabilities in image (optimized)
-
-            ## Documentation
-            - [GitHub Repository](https://github.com/Zaliyo/openvpn)
-            - [README](https://github.com/Zaliyo/openvpn/blob/main/README.md)
-            - [CHANGELOG](https://github.com/Zaliyo/openvpn/blob/main/CHANGELOG.md)
-
       - name: Build summary
         run: |
           echo "## Docker Build Complete ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Image Info" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** ${{ secrets.DOCKER_USERNAME }}/openvpn" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ghcr.io/${{ github.repository_owner }}/openvpn" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags:** ${{ steps.meta.outputs.version }}, latest" >> $GITHUB_STEP_SUMMARY
           echo "- **Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
