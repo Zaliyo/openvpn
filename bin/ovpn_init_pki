@@ -17,14 +17,44 @@ if [ -f "${EASYRSA_PKI}/ca.crt" ]; then
     exit 0
 fi
 
-# Ensure PKI directory exists
-mkdir -p "${EASYRSA_PKI}"
+# IMPORTANT: do NOT pre-create EASYRSA_PKI here. easyrsa's own
+# init-pki only runs `rm -rf "$EASYRSA_PKI"` when that directory
+# ALREADY exists (it creates it fresh via mkdir -p otherwise). If we
+# mkdir it ourselves first, we force that remove-then-recreate branch
+# on every single run - including a brand-new, empty volume - and
+# easyrsa's internal `rm -rf ... || die` has no retry, so it dies
+# outright on any transient "Device or resource busy" from the
+# storage/bind-mount backend.
+#
+# So: only touch EASYRSA_PKI ourselves if a stale/incomplete directory
+# is left over from an earlier failed run (we already know ca.crt is
+# missing at this point), and do that removal with retries of our own.
+if [ -d "${EASYRSA_PKI}" ]; then
+    echo "⚠️  Found a leftover/incomplete PKI directory at ${EASYRSA_PKI} - removing it before re-initializing..."
+    removed=""
+    for attempt in 1 2 3 4 5; do
+        if rm -rf "${EASYRSA_PKI}" 2>/tmp/ovpn_init_pki_rm_err; then
+            removed=1
+            break
+        fi
+        echo "   rm -rf busy (attempt ${attempt}/5), retrying in 2s..."
+        sleep 2
+    done
+    if [ -z "$removed" ]; then
+        echo ""
+        echo "❌ ERROR: could not remove stale PKI directory at ${EASYRSA_PKI} after 5 attempts:"
+        cat /tmp/ovpn_init_pki_rm_err 2>/dev/null
+        echo ""
+        echo "Something still has a file open under that path, or the storage"
+        echo "backend behind it is rejecting the removal. On the host, try:"
+        echo "  fuser -vm openvpn-data/conf/pki   (or: lsof +D openvpn-data/conf/pki)"
+        echo "to find what's holding it, then re-run this init."
+        exit 1
+    fi
+fi
 
-# IMPORTANT: do NOT cd into EASYRSA_PKI here. easyrsa's init-pki step
-# removes and recreates this directory (rm -rf "$EASYRSA_PKI"), and on
-# many filesystems (overlayfs included) that fails with
-# "Device or resource busy" if it's the shell's current working
-# directory. Stay outside of it instead.
+# IMPORTANT: do NOT cd into EASYRSA_PKI (or leave the shell inside it
+# while easyrsa recreates it either). Stay outside of it.
 cd /tmp
 
 # Use the easyrsa executable from bin (already in PATH)
