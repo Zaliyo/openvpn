@@ -160,15 +160,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     netcat-openbsd \
     && apt-get purge -y --allow-remove-essential perl perl-modules-5.36 perl-base \
-    && apt-get purge -y --allow-remove-essential openssl libssl3 \
     && apt-get autoremove -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && rm -rf /etc/perl /usr/lib/perl* /usr/share/perl* \
-    && rm -rf /etc/ssl /usr/lib/ssl \
     && grep -v "^perl" /var/lib/dpkg/status > /var/lib/dpkg/status.new && mv /var/lib/dpkg/status.new /var/lib/dpkg/status \
-    && sed -i '/^Package: perl/,/^$/d' /var/lib/dpkg/status \
-    && sed -i '/^Package: openssl/,/^$/d' /var/lib/dpkg/status \
-    && sed -i '/^Package: libssl/,/^$/d' /var/lib/dpkg/status
+    && sed -i '/^Package: perl/,/^$/d' /var/lib/dpkg/status
 
 # Copy everything pre-built from builder stage
 COPY --from=builder /install/ /
