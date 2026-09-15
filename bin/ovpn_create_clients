@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Create new VPN client certificates
+# Usage: ovpn_create_clients <client-name> [additional-client-names...]
+
+if [ $# -eq 0 ]; then
+    echo "Usage: create-clients <client-name> [client-name-2...]"
+    echo ""
+    echo "Examples:"
+    echo "  create-clients alice"
+    echo "  create-clients alice bob charlie"
+    exit 1
+fi
+
+cd /etc/openvpn/pki
+
+for CLIENT in "$@"; do
+    echo "📝 Generating certificate request for client: $CLIENT"
+    
+    # Generate key and request
+    /usr/local/bin/easyrsa --batch gen-req "$CLIENT" nopass
+    
+    echo "✍️  Signing certificate for client: $CLIENT"
+    
+    # Sign certificate
+    /usr/local/bin/easyrsa --batch sign-req client "$CLIENT"
+    
+    echo "✅ Client certificate created: $CLIENT"
+done
+
+echo ""
+echo "✅ All client certificates created successfully"
+echo ""
+echo "Client files location: /etc/openvpn/pki/issued/ and /etc/openvpn/pki/private/"
+echo "To retrieve client configurations, use:"
+echo "  docker cp openvpn:/etc/openvpn/pki/issued/\$CLIENT.crt ."
+echo "  docker cp openvpn:/etc/openvpn/pki/private/\$CLIENT.key ."

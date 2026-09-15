@@ -1,0 +1,64 @@
+#!/bin/bash
+set -e
+
+# List all VPN clients
+# Usage: ovpn_list_clients
+
+cd /etc/openvpn/pki
+
+if [ ! -d "issued" ]; then
+    echo "⚠️  No issued certificates found (PKI not initialized)"
+    exit 1
+fi
+
+echo "📋 OpenVPN Clients:"
+echo "=================="
+echo ""
+
+CLIENTS=$(find issued -name "*.crt" -not -name "ca.crt" -not -name "server.crt" 2>/dev/null | sed 's|issued/||;s|.crt||' | sort)
+
+if [ -z "$CLIENTS" ]; then
+    echo "No clients found"
+    exit 0
+fi
+
+while read -r CLIENT; do
+    CERT_FILE="issued/${CLIENT}.crt"
+    
+    if [ -f "$CERT_FILE" ]; then
+        # Check if certificate is revoked
+        if grep -q "^/C=" index.txt 2>/dev/null && grep "/${CLIENT}$" index.txt | grep -q "^R"; then
+            STATUS="❌ REVOKED"
+        else
+            # Check expiration
+            EXPIRY=$(openssl x509 -in "$CERT_FILE" -noout -enddate | cut -d= -f2)
+            DAYS_LEFT=$(( ($(date -d "$EXPIRY" +%s) - $(date +%s)) / 86400 ))
+            
+            if [ "$DAYS_LEFT" -lt 0 ]; then
+                STATUS="❌ EXPIRED"
+            elif [ "$DAYS_LEFT" -lt 30 ]; then
+                STATUS="⚠️  EXPIRING (${DAYS_LEFT} days)"
+            else
+                STATUS="✅ ACTIVE (${DAYS_LEFT} days)"
+            fi
+        fi
+        
+        printf "  %-20s %s\n" "$CLIENT" "$STATUS"
+    fi
+done <<< "$CLIENTS"
+
+echo ""
+echo "CA Certificate:"
+if [ -f "issued/ca.crt" ]; then
+    EXPIRY=$(openssl x509 -in "issued/ca.crt" -noout -enddate | cut -d= -f2)
+    DAYS_LEFT=$(( ($(date -d "$EXPIRY" +%s) - $(date +%s)) / 86400 ))
+    printf "  %-20s %s\n" "ca" "✅ ACTIVE (${DAYS_LEFT} days)"
+fi
+
+echo ""
+echo "Server Certificate:"
+if [ -f "issued/server.crt" ]; then
+    EXPIRY=$(openssl x509 -in "issued/server.crt" -noout -enddate | cut -d= -f2)
+    DAYS_LEFT=$(( ($(date -d "$EXPIRY" +%s) - $(date +%s)) / 86400 ))
+    printf "  %-20s %s\n" "server" "✅ ACTIVE (${DAYS_LEFT} days)"
+fi

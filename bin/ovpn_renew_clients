@@ -1,0 +1,35 @@
+#!/bin/bash
+set -e
+
+# Renew VPN client certificates
+# Usage: ovpn_renew_clients <client-name> [additional-client-names...]
+
+if [ $# -eq 0 ]; then
+    echo "Usage: renew-clients <client-name> [client-name-2...]"
+    echo ""
+    echo "Examples:"
+    echo "  renew-clients alice"
+    echo "  renew-clients alice bob"
+    exit 1
+fi
+
+cd /etc/openvpn/pki
+
+for CLIENT in "$@"; do
+    if [ ! -f "issued/${CLIENT}.crt" ]; then
+        echo "⚠️  Certificate not found for client: $CLIENT"
+        continue
+    fi
+    
+    echo "🔄 Renewing certificate for client: $CLIENT"
+    
+    # Renew certificate (revoke old, create new request, sign new)
+    /usr/local/bin/easyrsa --batch renew "$CLIENT" nopass
+    
+    echo "✅ Client certificate renewed: $CLIENT"
+done
+
+echo ""
+echo "✅ All client certificates renewed successfully"
+echo ""
+echo "💡 Tip: Clients will need to restart their VPN connections to use the new certificate"

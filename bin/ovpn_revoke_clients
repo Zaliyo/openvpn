@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Revoke VPN client certificates and regenerate CRL
+# Usage: ovpn_revoke_clients <client-name> [additional-client-names...]
+
+if [ $# -eq 0 ]; then
+    echo "Usage: revoke-clients <client-name> [client-name-2...]"
+    echo ""
+    echo "Examples:"
+    echo "  revoke-clients alice"
+    echo "  revoke-clients alice bob"
+    exit 1
+fi
+
+cd /etc/openvpn/pki
+
+for CLIENT in "$@"; do
+    if [ ! -f "issued/${CLIENT}.crt" ]; then
+        echo "⚠️  Certificate not found for client: $CLIENT"
+        continue
+    fi
+    
+    echo "🔓 Revoking certificate for client: $CLIENT"
+    
+    # Revoke certificate
+    /usr/local/bin/easyrsa --batch revoke "$CLIENT"
+    
+    echo "✅ Client revoked: $CLIENT"
+done
+
+echo ""
+echo "🔄 Regenerating Certificate Revocation List (CRL)..."
+/usr/local/bin/easyrsa gen-crl
+
+echo "✅ CRL regenerated: /etc/openvpn/pki/crl.pem"
+echo ""
+echo "⚠️  Revoked clients will no longer be able to connect to the VPN server"

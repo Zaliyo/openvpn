@@ -1,50 +1,61 @@
 #!/bin/bash
-# OpenVPN Entrypoint
-# Handles script routing and environment setup
-
 set -e
 
-# Prioritize compiled OpenSSL 3.6.4 over system libraries
-export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+# OpenVPN Server Entrypoint Script
+# Routes to different commands based on arguments
 
-# Source common functions
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Export helper functions and variables
-export OPENVPN_DIR="/etc/openvpn"
-export EASYRSA_DIR="${OPENVPN_DIR}/easy-rsa"
-export EASYRSA="/usr/local/bin/easyrsa"
-export EASYRSA_PKI="${OPENVPN_DIR}/pki"
-
-# Create easy-rsa symlink if it doesn't exist
-if [[ ! -d "${EASYRSA_DIR}" && ! -L "${EASYRSA_DIR}" ]]; then
-    mkdir -p "${EASYRSA_DIR}"
-    cd "${EASYRSA_DIR}"
-    /usr/local/bin/easyrsa --batch init-pki || true
-fi
-
-# Handle commands
-case "$1" in
+case "${1:-ovpn_run}" in
     ovpn_run)
-        exec /usr/local/bin/ovpn_run
-        ;;
-    ovpn_genconfig)
-        exec /usr/local/bin/ovpn_genconfig "${@:2}"
-        ;;
-    ovpn_initpki)
-        exec /usr/local/bin/ovpn_initpki
-        ;;
-    ovpn_getclient)
-        exec /usr/local/bin/ovpn_getclient "${@:2}"
-        ;;
-    ovpn_revokeclient)
-        exec /usr/local/bin/ovpn_revokeclient "${@:2}"
+        # Start OpenVPN server
+        /usr/local/sbin/openvpn /etc/openvpn/openvpn.conf
         ;;
     easyrsa)
-        exec /usr/local/bin/easyrsa "${@:2}"
+        # EasyRSA commands
+        shift
+        /usr/local/bin/easyrsa "$@"
+        ;;
+    create-clients)
+        # Create new VPN client
+        shift
+        /usr/local/bin/ovpn_create_clients "$@"
+        ;;
+    revoke-clients)
+        # Revoke VPN client certificate
+        shift
+        /usr/local/bin/ovpn_revoke_clients "$@"
+        ;;
+    list-clients)
+        # List all VPN clients
+        /usr/local/bin/ovpn_list_clients
+        ;;
+    status)
+        # Check server status
+        /usr/local/bin/ovpn_status
+        ;;
+    renew-clients)
+        # Renew client certificate
+        shift
+        /usr/local/bin/ovpn_renew_clients "$@"
+        ;;
+    backup-pki)
+        # Backup PKI (certificates, keys, CRL)
+        /usr/local/bin/ovpn_backup_pki
         ;;
     *)
-        # If no special command, pass everything to the command
-        exec "$@"
+        echo "OpenVPN Server - Available commands:"
+        echo "  ovpn_run               - Start OpenVPN server (default)"
+        echo "  easyrsa <args>         - EasyRSA PKI management"
+        echo "  create-clients <name>  - Create new VPN client"
+        echo "  revoke-clients <name>  - Revoke VPN client certificate"
+        echo "  list-clients           - List all VPN clients"
+        echo "  status                 - Check server status"
+        echo "  renew-clients <name>   - Renew client certificate"
+        echo "  backup-pki             - Backup PKI (encrypted)"
+        echo ""
+        echo "Examples:"
+        echo "  docker exec openvpn create-clients alice"
+        echo "  docker exec openvpn list-clients"
+        echo "  docker exec openvpn status"
+        exit 1
         ;;
 esac

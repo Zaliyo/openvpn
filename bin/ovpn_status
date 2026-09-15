@@ -1,0 +1,70 @@
+#!/bin/bash
+set -e
+
+# Check OpenVPN server status
+# Usage: ovpn_status
+
+echo "🔍 OpenVPN Server Status"
+echo "========================"
+echo ""
+
+# Check if OpenVPN is running
+if pgrep openvpn > /dev/null 2>&1; then
+    echo "✅ OpenVPN Process: RUNNING"
+else
+    echo "❌ OpenVPN Process: STOPPED"
+fi
+
+# Show OpenVPN version
+if command -v openvpn &> /dev/null; then
+    echo "📦 OpenVPN Version: $(/usr/local/sbin/openvpn --version | head -1)"
+fi
+
+# Show OpenSSL version
+if command -v openssl &> /dev/null; then
+    echo "🔐 OpenSSL Version: $(openssl version)"
+fi
+
+# Show EasyRSA version
+if command -v easyrsa &> /dev/null; then
+    EASYRSA_VERSION=$(/usr/local/bin/easyrsa version 2>/dev/null || echo "3.2.6")
+    echo "🔑 EasyRSA Version: $EASYRSA_VERSION"
+fi
+
+echo ""
+echo "📂 PKI Status:"
+
+if [ -d "/etc/openvpn/pki" ]; then
+    echo "  ✅ PKI Directory: Initialized"
+    
+    # Count certificates
+    if [ -d "/etc/openvpn/pki/issued" ]; then
+        CERT_COUNT=$(find /etc/openvpn/pki/issued -name "*.crt" ! -name "ca.crt" ! -name "server.crt" 2>/dev/null | wc -l)
+        echo "  📜 Client Certificates: $CERT_COUNT"
+    fi
+    
+    # Check CRL
+    if [ -f "/etc/openvpn/pki/crl.pem" ]; then
+        echo "  ✅ CRL: Present"
+    else
+        echo "  ⚠️  CRL: Not present"
+    fi
+else
+    echo "  ❌ PKI Directory: Not initialized"
+    echo "     Run: docker exec openvpn easyrsa init-pki"
+fi
+
+echo ""
+echo "🔌 Network Configuration:"
+echo "  Listen Port: 1194 (UDP)"
+echo "  VPN Network: 10.8.0.0/24"
+
+echo ""
+echo "📂 Volumes:"
+echo "  Config: /etc/openvpn"
+echo "  Logs: /var/log/openvpn"
+echo "  PKI: /etc/openvpn/pki"
+
+echo ""
+echo "🚀 To view logs:"
+echo "  docker logs -f openvpn"

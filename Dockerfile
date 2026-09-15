@@ -159,7 +159,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iptables \
     netcat-openbsd \
-    && apt-get remove -y --allow-remove-essential perl perl-modules-5.36 perl-base \
+    && apt-get purge -y --allow-remove-essential perl perl-modules-5.36 perl-base \
     && apt-get autoremove -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
