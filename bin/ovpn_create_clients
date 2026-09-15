@@ -24,7 +24,7 @@ for CLIENT in "$@"; do
     echo "✍️  Signing certificate for client: $CLIENT"
     
     # Sign certificate
-    /usr/local/bin/easyrsa --batch sign-req client "$CLIENT"
+    /usr/local/bin/easyrsa --batch --no-inline sign-req client "$CLIENT"
     
     echo "✅ Client certificate created: $CLIENT"
 done

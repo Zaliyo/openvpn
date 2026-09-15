@@ -214,15 +214,15 @@ renew_client() {
     # Generate new certificate
     if [[ "$VERBOSE" == "true" ]]; then
         if [[ "$USE_DOCKER_COMPOSE" == "true" ]]; then
-            docker-compose run --rm openvpn easyrsa --batch build-client-full "$clientname" nopass
+            docker-compose run --rm openvpn easyrsa --batch --no-inline build-client-full "$clientname" nopass
         else
-            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch build-client-full $clientname nopass"
+            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch --no-inline build-client-full $clientname nopass"
         fi
     else
         if [[ "$USE_DOCKER_COMPOSE" == "true" ]]; then
-            docker-compose run --rm openvpn easyrsa --batch build-client-full "$clientname" nopass > /dev/null 2>&1
+            docker-compose run --rm openvpn easyrsa --batch --no-inline build-client-full "$clientname" nopass > /dev/null 2>&1
         else
-            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch build-client-full $clientname nopass" > /dev/null 2>&1
+            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch --no-inline build-client-full $clientname nopass" > /dev/null 2>&1
         fi
     fi
     

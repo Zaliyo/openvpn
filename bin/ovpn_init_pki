@@ -74,7 +74,7 @@ echo "📋 Step 3: Generating server certificate request..."
 
 # Step 4: Sign server certificate
 echo "📋 Step 4: Signing server certificate..."
-"${EASYRSA_BIN}" --batch sign-req server server
+"${EASYRSA_BIN}" --batch --no-inline sign-req server server
 
 # Step 5: Generate Diffie-Hellman parameters
 echo "📋 Step 5: Generating Diffie-Hellman parameters (this may take a moment)..."

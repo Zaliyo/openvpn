@@ -203,11 +203,11 @@ create_client() {
     log "Checking if certificate already exists for: $clientname"
     if [[ "$USE_DOCKER_COMPOSE" == "true" ]]; then
         CERT_CHECK="docker-compose exec openvpn test -f /etc/openvpn/pki/issued/${clientname}.crt"
-        EASYRSA_CMD="docker-compose run --rm openvpn easyrsa --batch build-client-full"
+        EASYRSA_CMD="docker-compose run --rm openvpn easyrsa --batch --no-inline build-client-full"
         GETCLIENT_CMD="docker-compose run --rm openvpn ovpn_getclient"
     else
         CERT_CHECK="docker exec $CONTAINER_NAME test -f /etc/openvpn/pki/issued/${clientname}.crt"
-        EASYRSA_CMD="docker exec $CONTAINER_NAME bash -c 'export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch build-client-full"
+        EASYRSA_CMD="docker exec $CONTAINER_NAME bash -c 'export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch --no-inline build-client-full"
         GETCLIENT_CMD="docker exec $CONTAINER_NAME /usr/local/bin/ovpn_getclient"
     fi
     
@@ -237,15 +237,15 @@ create_client() {
     # Note: Non-interactive scripts always use 'nopass' since passphrases require TTY interaction
     if $VERBOSE; then
         if [[ "$USE_DOCKER_COMPOSE" == "true" ]]; then
-            docker-compose run --rm openvpn easyrsa --batch build-client-full "$clientname" nopass
+            docker-compose run --rm openvpn easyrsa --batch --no-inline build-client-full "$clientname" nopass
         else
-            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch build-client-full $clientname nopass"
+            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch --no-inline build-client-full $clientname nopass"
         fi
     else
         if [[ "$USE_DOCKER_COMPOSE" == "true" ]]; then
-            docker-compose run --rm openvpn easyrsa --batch build-client-full "$clientname" nopass > /dev/null 2>&1
+            docker-compose run --rm openvpn easyrsa --batch --no-inline build-client-full "$clientname" nopass > /dev/null 2>&1
         else
-            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch build-client-full $clientname nopass" > /dev/null 2>&1
+            docker exec "$CONTAINER_NAME" bash -c "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && cd /etc/openvpn && /usr/local/bin/easyrsa --batch --no-inline build-client-full $clientname nopass" > /dev/null 2>&1
         fi
     fi
     
