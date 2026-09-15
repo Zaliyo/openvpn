@@ -57,11 +57,12 @@ RUN set -e && \
     rm -rf source && \
     tar -xzf openssl-${OPENSSL_VERSION}.tar.gz && \
     cd openssl-${OPENSSL_VERSION} && \
-    echo "🔨 Configuring OpenSSL ${OPENSSL_VERSION} (minimal)..." && \
-    ./Configure linux-aarch64 \
+    echo "🔨 Configuring OpenSSL ${OPENSSL_VERSION}..." && \
+    CFLAGS="-O3" CXXFLAGS="-O3" ./Configure linux-generic64 \
         --prefix=/usr/local \
         --openssldir=/etc/ssl \
         shared \
+        no-asm \
         no-tests \
         no-docs && \
     echo "🔨 Compiling OpenSSL ${OPENSSL_VERSION}..." && \
