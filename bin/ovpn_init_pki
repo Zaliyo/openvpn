@@ -26,7 +26,7 @@ EASYRSA_BIN="/usr/local/bin/easyrsa"
 
 # Step 1: Initialize PKI
 echo "📋 Step 1: Initializing PKI directory structure..."
-"${EASYRSA_BIN}" init-pki
+"${EASYRSA_BIN}" init-pki --batch
 
 # Step 2: Build CA
 echo "📋 Step 2: Building Certificate Authority (CA)..."
