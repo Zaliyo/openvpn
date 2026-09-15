@@ -8,7 +8,7 @@
 - ✅ **OpenSSL 3.6.4** - Security hardened, CVE-2026-75803 patched
 - ✅ **EasyRSA 3.2.6** - Official PKI certificate management
 - ✅ **Multi-architecture** - linux/amd64 + linux/arm64 support
-- ✅ **Zero vulnerabilities** - Aggressive hardening, Perl CVEs eliminated
+- ✅ **Hardened build** - Perl and its packages purged from the final image (source-compiled OpenSSL above patches CVE-2026-75803)
 - ✅ **Modern encryption** - AES-256-GCM, ChaCha20-Poly1305, TLS 1.2+
 - ✅ **Zero-config first boot** - default `openvpn.conf` and PKI (CA, server cert, DH params, TLS-crypt key) are generated automatically on first startup, no manual init step
 - ✅ **6 management scripts** - Create, revoke, list, status, renew, backup clients
@@ -225,7 +225,6 @@ docker-compose restart openvpn
 - `.ovpn` client bundle lifecycle kept consistent across create/revoke/renew
 - 6 management scripts for certificate lifecycle
 - Multi-architecture builds (amd64 + arm64)
-- Zero known vulnerabilities
 
 For full changelog, see [CHANGELOG.md](https://github.com/Zaliyo/openvpn/blob/main/CHANGELOG.md)
 
