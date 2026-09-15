@@ -131,6 +131,15 @@ RUN mkdir -p /install/etc/openvpn /install/var/log/openvpn /install/usr/local/bi
 # Copy helper scripts to builder
 COPY bin/ /install/usr/local/bin/
 
+# Default OpenVPN server config. entrypoint.sh installs this to
+# /etc/openvpn/openvpn.conf on first boot if that file is missing, so
+# deployments that only mount a subdirectory (e.g. .../pki) for
+# persisted cert data - and never touch /etc/openvpn itself - still
+# get a working config out of the box, no manual host-side setup
+# required.
+RUN mkdir -p /install/usr/local/share/openvpn
+COPY conf/openvpn.conf.default /install/usr/local/share/openvpn/openvpn.conf.default
+
 # Make scripts executable in builder
 RUN chmod +x /install/usr/local/bin/ovpn_* && \
     chmod +x /install/usr/local/bin/entrypoint.sh && \

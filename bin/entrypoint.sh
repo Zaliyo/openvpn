@@ -6,6 +6,21 @@ set -e
 
 case "${1:-ovpn_run}" in
     ovpn_run)
+        # Install a default server config on first-ever startup if none
+        # exists yet. Deployments that only persist a subdirectory of
+        # /etc/openvpn (e.g. its pki/ subfolder) never populate
+        # openvpn.conf themselves, and this image doesn't bake one into
+        # /etc/openvpn directly (that path may be entirely unmounted, or
+        # mounted elsewhere) - so without this, ovpn_run below has no
+        # config to start with. Never overwrites an existing file, so
+        # any customization the operator makes to openvpn.conf persists
+        # across restarts.
+        if [ ! -f "/etc/openvpn/openvpn.conf" ]; then
+            echo "⚙️  No openvpn.conf found - installing the default configuration..."
+            mkdir -p /etc/openvpn
+            cp /usr/local/share/openvpn/openvpn.conf.default /etc/openvpn/openvpn.conf
+        fi
+
         # Auto-initialize PKI on first-ever startup if it doesn't exist yet.
         # Safe to run on every boot: ovpn_init_pki itself no-ops (and exits 0)
         # once ca.crt is already present, so restarts are unaffected.
