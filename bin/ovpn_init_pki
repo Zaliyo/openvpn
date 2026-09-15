@@ -19,7 +19,13 @@ fi
 
 # Ensure PKI directory exists
 mkdir -p "${EASYRSA_PKI}"
-cd "${EASYRSA_PKI}"
+
+# IMPORTANT: do NOT cd into EASYRSA_PKI here. easyrsa's init-pki step
+# removes and recreates this directory (rm -rf "$EASYRSA_PKI"), and on
+# many filesystems (overlayfs included) that fails with
+# "Device or resource busy" if it's the shell's current working
+# directory. Stay outside of it instead.
+cd /tmp
 
 # Use the easyrsa executable from bin (already in PATH)
 EASYRSA_BIN="/usr/local/bin/easyrsa"

@@ -6,27 +6,37 @@ set -e
 
 case "${1:-ovpn_run}" in
     ovpn_run)
-        # Start OpenVPN server
-        # Check if PKI is initialized
+        # Auto-initialize PKI on first-ever startup if it doesn't exist yet.
+        # Safe to run on every boot: ovpn_init_pki itself no-ops (and exits 0)
+        # once ca.crt is already present, so restarts are unaffected.
         if [ ! -f "/etc/openvpn/pki/ca.crt" ] || [ ! -f "/etc/openvpn/pki/issued/server.crt" ]; then
-            echo "❌ ERROR: PKI not initialized!"
+            echo "⚙️  PKI not found - running first-time initialization..."
             echo ""
-            echo "⚡ Initialize all certificates in ONE step:"
-            echo "  docker exec openvpn init-pki"
+            # entrypoint.sh runs with `set -e`; don't let a failed init here
+            # kill the script before we've had a chance to report it below.
+            /usr/local/bin/ovpn_init_pki || true
+
+            if [ ! -f "/etc/openvpn/pki/ca.crt" ] || [ ! -f "/etc/openvpn/pki/issued/server.crt" ]; then
+                echo ""
+                echo "❌ ERROR: PKI initialization failed - see the output above."
+                echo "Fix the underlying issue, then either:"
+                echo "  docker exec openvpn init-pki"
+                echo "or restart the container to retry automatically:"
+                echo "  docker restart openvpn"
+                echo ""
+                echo "⏳ Container waiting - OpenVPN will not start without a PKI."
+                # Keep container alive so `docker exec` / logs remain usable
+                tail -f /dev/null
+            fi
+
             echo ""
-            echo "Then restart the container:"
-            echo "  docker restart openvpn"
+            echo "✅ PKI ready - starting OpenVPN server."
+            echo "💡 Create your first client with: docker exec openvpn create-clients alice"
             echo ""
-            echo "Then create clients:"
-            echo "  docker exec openvpn create-clients alice"
-            echo ""
-            echo "⏳ Container waiting for PKI initialization..."
-            # Keep container alive
-            tail -f /dev/null
         fi
-        
+
         # Start OpenVPN server
-        /usr/local/sbin/openvpn /etc/openvpn/openvpn.conf
+        exec /usr/local/sbin/openvpn /etc/openvpn/openvpn.conf
         ;;
     easyrsa)
         # EasyRSA commands
