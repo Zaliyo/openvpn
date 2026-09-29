@@ -84,6 +84,15 @@ echo "📋 Step 5: Generating Diffie-Hellman parameters (this may take a moment)
 echo "📋 Step 6: Generating TLS-Crypt key..."
 /usr/local/sbin/openvpn --genkey secret "${EASYRSA_PKI}/ta.key"
 
+# Step 7: Seed an empty CRL. openvpn.conf.default sets `crl-verify`, and
+# OpenVPN refuses to start if that file is missing - so the server would not
+# come up until the operator happened to revoke someone. gen-crl on a PKI with
+# no revocations produces a valid, empty CRL.
+echo "📋 Step 7: Generating initial (empty) CRL..."
+"${EASYRSA_BIN}" --batch gen-crl
+# Readable after OpenVPN drops to `user nobody`, which re-reads this on change.
+chmod 644 "${EASYRSA_PKI}/crl.pem"
+
 # Verify all files exist
 echo ""
 echo "✅ PKI Initialization Complete!"
@@ -93,6 +102,7 @@ ls -lh "${EASYRSA_PKI}"/*.crt 2>/dev/null || true
 ls -lh "${EASYRSA_PKI}"/*.key 2>/dev/null || true
 ls -lh "${EASYRSA_PKI}"/dh.pem 2>/dev/null || true
 ls -lh "${EASYRSA_PKI}"/ta.key 2>/dev/null || true
+ls -lh "${EASYRSA_PKI}"/crl.pem 2>/dev/null || true
 
 echo ""
 echo "📝 Next steps:"

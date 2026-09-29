@@ -7,6 +7,9 @@ on:
     paths:
       - 'Dockerfile'
       - 'bin/**'
+      # openvpn.conf.default is baked into the image, so a config-only change
+      # has to rebuild - without this, edits here never reach a published tag.
+      - 'conf/**'
       - 'source/**'
       - '.github/workflows/docker-build.yml'
   workflow_dispatch:

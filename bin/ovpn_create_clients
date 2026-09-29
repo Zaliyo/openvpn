@@ -30,6 +30,8 @@ cd /etc/openvpn/pki
 . /usr/local/bin/lib_ovpn_client_bundle.sh
 
 for CLIENT in "$@"; do
+    validate_client_name "$CLIENT" || exit 1
+
     echo "📝 Generating certificate request for client: $CLIENT"
 
     # Generate key and request

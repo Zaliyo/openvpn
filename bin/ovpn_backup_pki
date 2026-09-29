@@ -4,7 +4,11 @@ set -e
 # Backup PKI (certificates, keys, CRL) with GPG encryption
 # Usage: ovpn_backup_pki
 
-BACKUP_DIR="/openvpn-backups"
+# Must match the container path both docker-compose.yml files mount
+# (./data/backups:/backups and ./openvpn-backups:/backups). This used to be
+# /openvpn-backups, which is not a mount point - every backup was written to
+# the container's own writable layer and lost on the next recreate.
+BACKUP_DIR="${BACKUP_DIR:-/backups}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/openvpn-backup-${TIMESTAMP}.tar.gz"
 
@@ -23,18 +27,26 @@ if [ ! -d "/etc/openvpn/pki" ]; then
 fi
 
 echo "📦 Creating backup archive..."
+umask 077   # the archive contains the CA and server private keys
 tar -czf "${BACKUP_FILE}" -C /etc/openvpn pki
 
 if [ ! -f "$BACKUP_FILE" ]; then
     echo "❌ Backup creation failed"
     exit 1
 fi
+chmod 600 "${BACKUP_FILE}"
 
 BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
 echo "✅ Backup created: $BACKUP_FILE (${BACKUP_SIZE})"
 
 # Check if GPG is available for encryption
-if command -v gpg &> /dev/null && [ -n "$GPG_PASSPHRASE" ]; then
+if ! command -v gpg &> /dev/null; then
+    echo ""
+    echo "❌ WARNING: gpg is not installed in this image, so this backup is NOT encrypted."
+    echo "   ${BACKUP_FILE} contains the CA private key and every client key in cleartext."
+    echo "   Encrypt it on the host before storing it anywhere:"
+    echo "     gpg --symmetric --cipher-algo AES256 <file>"
+elif [ -n "$GPG_PASSPHRASE" ]; then
     echo "🔐 Encrypting backup with GPG..."
     
     # Encrypt file
@@ -46,6 +58,7 @@ if command -v gpg &> /dev/null && [ -n "$GPG_PASSPHRASE" ]; then
     rm -f "$BACKUP_FILE"
     
     ENCRYPTED_FILE="${BACKUP_FILE}.gpg"
+    chmod 600 "$ENCRYPTED_FILE"
     ENCRYPTED_SIZE=$(du -h "$ENCRYPTED_FILE" | cut -f1)
     echo "✅ Encrypted backup: $ENCRYPTED_FILE (${ENCRYPTED_SIZE})"
     echo ""

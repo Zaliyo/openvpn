@@ -23,6 +23,23 @@ if [ -z "$OVPN_SERVER_HOST" ]; then
     OVPN_SERVER_HOST="YOUR_SERVER_IP_OR_HOSTNAME"
 fi
 
+# Client names land in filesystem paths (pki/issued/<name>.crt,
+# /opt/users/<name>.ovpn) and in easyrsa's cert subject, so constrain them to a
+# safe character set. Without this, a name like "../../tmp/x" writes the .ovpn
+# outside OVPN_USERS_DIR, and names with spaces or globs silently produce
+# mismatched cert/bundle pairs.
+validate_client_name() {
+    case "$1" in
+        ""|.|..)
+            echo "❌ ERROR: invalid client name: '$1'" >&2; return 1 ;;
+    esac
+    if ! printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'; then
+        echo "❌ ERROR: invalid client name: '$1'" >&2
+        echo "   Use 1-64 chars of A-Z a-z 0-9 . _ - and start with a letter or digit." >&2
+        return 1
+    fi
+}
+
 # Build one client's .ovpn from its issued cert/key plus the CA and
 # tls-crypt key, matching the ciphers/TLS settings used server-side in
 # conf/openvpn.conf.default. Overwrites any existing file for the same
@@ -50,7 +67,6 @@ build_ovpn_file() {
         echo "persist-key"
         echo "persist-tun"
         echo "remote-cert-tls server"
-        echo "cipher AES-256-GCM"
         echo "auth SHA256"
         echo "tls-version-min 1.2"
         echo "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305"

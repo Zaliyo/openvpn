@@ -4,6 +4,53 @@ set -e
 # OpenVPN Server Entrypoint Script
 # Routes to different commands based on arguments
 
+# Set up the NAT and forwarding that VPN clients need to reach the internet.
+# The server config pushes "redirect-gateway def1", so without this clients
+# connect successfully and then have no connectivity at all. Requires
+# NET_ADMIN on the container (see docker-compose.yml).
+configure_vpn_network() {
+    local VPN_NET OUT_IF SERVER_LINE
+
+    # Derive the VPN subnet from the running config so operator edits to the
+    # `server` directive are picked up instead of silently NATing the wrong net.
+    SERVER_LINE=$(awk '$1 == "server" { print $2, $3; exit }' /etc/openvpn/openvpn.conf)
+    if [ -n "$SERVER_LINE" ]; then
+        VPN_NET=$(echo "$SERVER_LINE" | awk '{print $1"/"$2}')
+    else
+        VPN_NET="192.168.255.0/255.255.255.0"
+    fi
+
+    OUT_IF=$(ip route show default | awk '{for (i=1; i<=NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+    if [ -z "$OUT_IF" ]; then
+        echo "⚠️  Could not determine the outbound interface - skipping NAT setup."
+        echo "   VPN clients will connect but will not have internet access."
+        return 0
+    fi
+
+    echo "🌐 Configuring VPN network"
+    echo "   VPN network : ${VPN_NET}"
+    echo "   Outbound IF : ${OUT_IF}"
+
+    # Don't let a read-only /proc/sys take down the whole entrypoint (set -e).
+    if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+        echo "⚠️  Could not enable net.ipv4.ip_forward - client routing may not work."
+    fi
+
+    # -C first: this runs on every boot, and /etc/openvpn may be persisted
+    # while the netfilter rules are not, so the rule must be re-added when
+    # absent but never duplicated.
+    if ! iptables -t nat -C POSTROUTING -s "$VPN_NET" -o "$OUT_IF" -j MASQUERADE 2>/dev/null; then
+        iptables -t nat -A POSTROUTING -s "$VPN_NET" -o "$OUT_IF" -j MASQUERADE
+    fi
+
+    if ! iptables -C FORWARD -i tun0 -o "$OUT_IF" -j ACCEPT 2>/dev/null; then
+        iptables -A FORWARD -i tun0 -o "$OUT_IF" -j ACCEPT
+    fi
+    if ! iptables -C FORWARD -i "$OUT_IF" -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+        iptables -A FORWARD -i "$OUT_IF" -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    fi
+}
+
 case "${1:-ovpn_run}" in
     ovpn_run)
         # Install a default server config on first-ever startup if none
@@ -49,6 +96,22 @@ case "${1:-ovpn_run}" in
             echo "💡 Create your first client with: docker exec openvpn create-clients alice"
             echo ""
         fi
+
+        # Safety net for PKIs created before openvpn.conf.default gained
+        # `crl-verify`, and for deployments that persist only pki/ while
+        # openvpn.conf is reinstalled fresh each boot: crl-verify on a missing
+        # file is fatal at startup, so seed an empty CRL rather than crash-loop.
+        if grep -qs "^crl-verify" /etc/openvpn/openvpn.conf \
+            && [ -f "/etc/openvpn/pki/ca.crt" ] \
+            && [ ! -f "/etc/openvpn/pki/crl.pem" ]; then
+            echo "⚙️  crl-verify is configured but pki/crl.pem is missing - generating an empty CRL..."
+            ( cd /etc/openvpn/pki \
+              && EASYRSA_PKI=/etc/openvpn/pki EASYRSA=/usr/local/easyrsa/easyrsa3 \
+                 /usr/local/bin/easyrsa --batch gen-crl ) || true
+            chmod 644 /etc/openvpn/pki/crl.pem 2>/dev/null || true
+        fi
+
+        configure_vpn_network
 
         # Start OpenVPN server
         exec /usr/local/sbin/openvpn /etc/openvpn/openvpn.conf

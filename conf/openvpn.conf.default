@@ -13,23 +13,44 @@ key /etc/openvpn/pki/private/server.key
 dh /etc/openvpn/pki/dh.pem
 tls-crypt /etc/openvpn/pki/ta.key
 
+# Without this, revocation does nothing: revoke-clients regenerates crl.pem
+# but OpenVPN never consults a CRL unless it is named here, so a revoked
+# client keeps connecting indefinitely. OpenVPN re-reads the file when it
+# changes, so a revoke takes effect without restarting the server.
+# ovpn_init_pki seeds an empty CRL so this path exists on first boot.
+crl-verify /etc/openvpn/pki/crl.pem
+
 # Network Configuration
 server 192.168.255.0 255.255.255.0
-ifconfig-pool-persist ipp.txt
+# Absolute path: OpenVPN's cwd is the image's WORKDIR (/tmp), so a bare
+# "ipp.txt" lands in /tmp, which is not a persisted volume - client lease
+# assignments would silently reset on every container recreate. /etc/openvpn
+# is the persisted mount.
+ifconfig-pool-persist /etc/openvpn/ipp.txt
 push "redirect-gateway def1 bypass-dhcp"
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 8.8.4.4"
 
-# Topology - ensure compatibility across platforms
-topology net30
+# Topology - `subnet` is the default for --mode server since 2.6 and is
+# pushed to clients automatically. Do not set net30 here: OpenVPN warns at
+# every startup that net30 with an IPv4 pool will be removed in a future
+# release, and it burns a /30 per client (~62 clients in a /24 vs 253).
+topology subnet
 
 # Performance
 keepalive 10 120
 user nobody
 group nogroup
 
+# Required alongside `user nobody`: after dropping privileges the process can
+# no longer re-read the root-owned 0600 server key or re-open /dev/net/tun, so
+# a restart (SIGUSR1, ping-restart) would fail without these.
+persist-key
+persist-tun
+
 # Security
-cipher AES-256-GCM
+# No --cipher here: it is a no-op in TLS mode as of 2.6 (the implicit fallback
+# to it was removed), so data-ciphers below is what actually applies.
 auth SHA256
 tls-version-min 1.2
 tls-version-max 1.3

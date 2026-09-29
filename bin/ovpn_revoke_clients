@@ -28,6 +28,14 @@ cd /etc/openvpn/pki
 USERS_DIR="/opt/users"
 
 for CLIENT in "$@"; do
+    # Same rule as lib_ovpn_client_bundle.sh's validate_client_name: CLIENT is
+    # interpolated into paths below (including an rm -f), so reject anything
+    # outside the safe set rather than letting "../.." escape USERS_DIR.
+    if ! printf '%s' "$CLIENT" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'; then
+        echo "❌ ERROR: invalid client name: '$CLIENT' - skipping" >&2
+        continue
+    fi
+
     if [ ! -f "issued/${CLIENT}.crt" ]; then
         echo "⚠️  Certificate not found for client: $CLIENT"
         continue
@@ -53,6 +61,9 @@ done
 echo ""
 echo "🔄 Regenerating Certificate Revocation List (CRL)..."
 /usr/local/bin/easyrsa gen-crl
+# OpenVPN has dropped to `user nobody` by now and re-reads the CRL on change;
+# easyrsa's default mode can leave it unreadable to that user.
+chmod 644 /etc/openvpn/pki/crl.pem
 
 echo "✅ CRL regenerated: /etc/openvpn/pki/crl.pem"
 echo ""

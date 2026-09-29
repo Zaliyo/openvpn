@@ -56,8 +56,17 @@ fi
 
 echo ""
 echo "🔌 Network Configuration:"
-echo "  Listen Port: 1194 (UDP)"
-echo "  VPN Network: 10.8.0.0/24"
+# Read these from the live config rather than hardcoding. The VPN network was
+# reported as 10.8.0.0/24 while the shipped config actually uses
+# 192.168.255.0/24, so this panel contradicted the running server.
+OVPN_CONF="/etc/openvpn/openvpn.conf"
+if [ -f "$OVPN_CONF" ]; then
+    echo "  Listen Port: $(awk '$1 == "port" { print $2; exit }' "$OVPN_CONF") ($(awk '$1 == "proto" { print toupper($2); exit }' "$OVPN_CONF"))"
+    echo "  VPN Network: $(awk '$1 == "server" { print $2"/"$3; exit }' "$OVPN_CONF")"
+    echo "  Topology:    $(awk '$1 == "topology" { print $2; exit }' "$OVPN_CONF")"
+else
+    echo "  ⚠️  $OVPN_CONF not found"
+fi
 
 echo ""
 echo "📂 Volumes:"
