@@ -13,7 +13,7 @@ ARG OPENSSL_VERSION=3.6.4
 # ============================================================================
 # Stage 1: Build OpenVPN and prepare EasyRSA
 # ============================================================================
-FROM debian:12-slim AS builder
+FROM debian:13-slim AS builder
 
 ARG OPENVPN_VERSION
 ARG EASYRSA_VERSION
@@ -154,7 +154,7 @@ RUN chmod +x /install/usr/local/bin/ovpn_* && \
 # ============================================================================
 # Stage 2: Runtime image - minimal Debian with only essential packages
 # ============================================================================
-FROM debian:12-slim
+FROM debian:13-slim
 
 ARG OPENVPN_VERSION
 ARG EASYRSA_VERSION
