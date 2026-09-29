@@ -18,6 +18,10 @@ tls-crypt /etc/openvpn/pki/ta.key
 # client keeps connecting indefinitely. OpenVPN re-reads the file when it
 # changes, so a revoke takes effect without restarting the server.
 # ovpn_init_pki seeds an empty CRL so this path exists on first boot.
+# NOTE: an EXPIRED CRL makes OpenVPN reject *all* new connections, so the CRL
+# is generated with a long validity (EASYRSA_CRL_DAYS) and the entrypoint
+# refreshes it when it is close to expiring. Don't shorten that without adding
+# a renewal job.
 crl-verify /etc/openvpn/pki/crl.pem
 
 # Network Configuration
@@ -43,9 +47,9 @@ user nobody
 group nogroup
 
 # Required alongside `user nobody`: after dropping privileges the process can
-# no longer re-read the root-owned 0600 server key or re-open /dev/net/tun, so
-# a restart (SIGUSR1, ping-restart) would fail without these.
-persist-key
+# no longer re-open /dev/net/tun, so a restart (SIGUSR1, ping-restart) would
+# fail without this. No --persist-key here: 2.7 always persists keys and logs
+# "DEPRECATED OPTION: --persist-key option ignored" if you set it.
 persist-tun
 
 # Security

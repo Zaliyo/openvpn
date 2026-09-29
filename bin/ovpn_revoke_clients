@@ -60,7 +60,9 @@ done
 
 echo ""
 echo "🔄 Regenerating Certificate Revocation List (CRL)..."
-/usr/local/bin/easyrsa gen-crl
+# 3650 days, not EasyRSA's 180-day default: an expired CRL makes OpenVPN
+# reject all new connections, not just revoked ones.
+EASYRSA_CRL_DAYS=3650 /usr/local/bin/easyrsa gen-crl
 # OpenVPN has dropped to `user nobody` by now and re-reads the CRL on change;
 # easyrsa's default mode can leave it unreadable to that user.
 chmod 644 /etc/openvpn/pki/crl.pem

@@ -32,8 +32,18 @@ configure_vpn_network() {
     echo "   Outbound IF : ${OUT_IF}"
 
     # Don't let a read-only /proc/sys take down the whole entrypoint (set -e).
+    # /proc/sys is read-only under Docker Desktop and some runtimes, but the
+    # value is often already 1 there - so only complain if forwarding is really
+    # off, otherwise this warns on a perfectly working setup.
     if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
-        echo "⚠️  Could not enable net.ipv4.ip_forward - client routing may not work."
+        if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" = "1" ]; then
+            echo "   IP forwarding : already enabled (could not write, value already 1)"
+        else
+            echo "⚠️  Could not enable net.ipv4.ip_forward and it is currently off -"
+            echo "   VPN clients will not be routed. Add this to your compose service:"
+            echo "     sysctls:"
+            echo "       - net.ipv4.ip_forward=1"
+        fi
     fi
 
     # -C first: this runs on every boot, and /etc/openvpn may be persisted
@@ -101,14 +111,26 @@ case "${1:-ovpn_run}" in
         # `crl-verify`, and for deployments that persist only pki/ while
         # openvpn.conf is reinstalled fresh each boot: crl-verify on a missing
         # file is fatal at startup, so seed an empty CRL rather than crash-loop.
-        if grep -qs "^crl-verify" /etc/openvpn/openvpn.conf \
-            && [ -f "/etc/openvpn/pki/ca.crt" ] \
-            && [ ! -f "/etc/openvpn/pki/crl.pem" ]; then
-            echo "⚙️  crl-verify is configured but pki/crl.pem is missing - generating an empty CRL..."
-            ( cd /etc/openvpn/pki \
-              && EASYRSA_PKI=/etc/openvpn/pki EASYRSA=/usr/local/easyrsa/easyrsa3 \
-                 /usr/local/bin/easyrsa --batch gen-crl ) || true
-            chmod 644 /etc/openvpn/pki/crl.pem 2>/dev/null || true
+        if grep -qs "^crl-verify" /etc/openvpn/openvpn.conf && [ -f "/etc/openvpn/pki/ca.crt" ]; then
+            crl_reason=""
+            if [ ! -f "/etc/openvpn/pki/crl.pem" ]; then
+                crl_reason="pki/crl.pem is missing"
+            elif ! openssl crl -in /etc/openvpn/pki/crl.pem -noout \
+                    -checkend 2592000 >/dev/null 2>&1; then
+                # Expired, or expiring within 30 days. OpenVPN fails CLOSED on an
+                # expired CRL - it rejects every new connection, not just revoked
+                # ones - so refresh it here rather than let the server lock
+                # everyone out on a date nobody is watching.
+                crl_reason="pki/crl.pem is expired or expires within 30 days"
+            fi
+
+            if [ -n "$crl_reason" ]; then
+                echo "⚙️  crl-verify is configured but ${crl_reason} - regenerating..."
+                ( cd /etc/openvpn/pki \
+                  && EASYRSA_PKI=/etc/openvpn/pki EASYRSA=/usr/local/easyrsa/easyrsa3 \
+                     EASYRSA_CRL_DAYS=3650 /usr/local/bin/easyrsa --batch gen-crl ) || true
+                chmod 644 /etc/openvpn/pki/crl.pem 2>/dev/null || true
+            fi
         fi
 
         configure_vpn_network

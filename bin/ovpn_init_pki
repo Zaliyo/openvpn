@@ -89,7 +89,11 @@ echo "📋 Step 6: Generating TLS-Crypt key..."
 # come up until the operator happened to revoke someone. gen-crl on a PKI with
 # no revocations produces a valid, empty CRL.
 echo "📋 Step 7: Generating initial (empty) CRL..."
-"${EASYRSA_BIN}" --batch gen-crl
+# EasyRSA defaults to a 180-day CRL. openvpn.conf.default enables crl-verify,
+# and OpenVPN rejects *every* new connection once the CRL is expired - so a
+# short window turns into a total outage on a timer. Long validity here; the
+# CRL is regenerated on each revoke and refreshed by entrypoint.sh anyway.
+EASYRSA_CRL_DAYS=3650 "${EASYRSA_BIN}" --batch gen-crl
 # Readable after OpenVPN drops to `user nobody`, which re-reads this on change.
 chmod 644 "${EASYRSA_PKI}/crl.pem"
 
