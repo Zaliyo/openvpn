@@ -93,7 +93,7 @@ renew-clients alice        # Renew expiring certificate, rewrites users/alice.ov
 
 # Server & Backup
 status                     # Check server health and version
-backup-pki                # Backup certificates (encrypted)
+backup-pki                # Backup PKI (encrypted; needs GPG_PASSPHRASE[_FILE])
 ```
 
 ## Configuration
@@ -195,13 +195,40 @@ chmod 755 data/conf
 
 ### Backup and Restore PKI
 
-```bash
-# Backup with encryption
-docker-compose exec openvpn backup-pki
+The archive contains the CA private key, the server key and every client key,
+so `backup-pki` **requires a passphrase and refuses to run without one**. A
+mounted file is preferred over an environment variable, which is readable via
+`/proc/<pid>/environ` and lands in your shell history.
 
-# Restore from backup
-docker cp openvpn-backup-20260915_120000.tar.gz openvpn:/tmp/
-docker-compose exec openvpn restore-pki /tmp/openvpn-backup-20260915_120000.tar.gz
+```bash
+# Preferred: passphrase from a mounted file / docker secret
+docker-compose exec -e GPG_PASSPHRASE_FILE=/run/secrets/ovpn_backup_pass \
+  openvpn backup-pki
+
+# Or via environment variable
+docker-compose exec -e GPG_PASSPHRASE='<passphrase>' openvpn backup-pki
+```
+
+The archive is streamed straight into GPG, so the unencrypted PKI never touches
+the backups volume, and it is verified to decrypt before the command reports
+success. Output is `openvpn-backup-<timestamp>.tar.gz.gpg`, mode 0600, in
+`/backups` (AES-256, s2k mode 3 / SHA-512 / max iteration count).
+
+Store the passphrase somewhere other than the backup. Without it the archive is
+unrecoverable; with it, it is the entire VPN.
+
+```bash
+# Restore: decrypt and unpack over /etc/openvpn
+docker cp openvpn-backup-<timestamp>.tar.gz.gpg openvpn:/tmp/
+docker-compose exec openvpn sh -c \
+  'gpg -d /tmp/openvpn-backup-<timestamp>.tar.gz.gpg | tar -xzf - -C /etc/openvpn'
+docker-compose restart openvpn
+```
+
+An unencrypted backup is still possible, but has to be requested explicitly:
+
+```bash
+docker-compose exec -e ALLOW_UNENCRYPTED_BACKUP=1 openvpn backup-pki
 ```
 
 ### Monitor Client Connections

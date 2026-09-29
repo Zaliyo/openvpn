@@ -26,51 +26,127 @@ if [ ! -d "/etc/openvpn/pki" ]; then
     exit 1
 fi
 
-echo "📦 Creating backup archive..."
-umask 077   # the archive contains the CA and server private keys
-tar -czf "${BACKUP_FILE}" -C /etc/openvpn pki
+# The archive holds the CA private key, the server key and every client key -
+# i.e. the whole VPN's trust. Treat an unencrypted one as a breach waiting to
+# happen: 0600 and never wider.
+umask 077
 
-if [ ! -f "$BACKUP_FILE" ]; then
-    echo "❌ Backup creation failed"
-    exit 1
+# Passphrase resolution. GPG_PASSPHRASE_FILE is preferred: an env var is
+# readable via /proc/<pid>/environ by anything root in this namespace, and
+# `docker exec -e GPG_PASSPHRASE=...` leaves the secret in host shell history.
+# A mounted file (docker secret, tmpfs) avoids both.
+PASSPHRASE_SOURCE=""
+if [ -n "${GPG_PASSPHRASE_FILE:-}" ]; then
+    if [ ! -r "$GPG_PASSPHRASE_FILE" ]; then
+        echo "❌ ERROR: GPG_PASSPHRASE_FILE is set but not readable: $GPG_PASSPHRASE_FILE"
+        exit 1
+    fi
+    PASSPHRASE_SOURCE="file"
+elif [ -n "${GPG_PASSPHRASE:-}" ]; then
+    PASSPHRASE_SOURCE="env"
 fi
-chmod 600 "${BACKUP_FILE}"
 
-BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
-echo "✅ Backup created: $BACKUP_FILE (${BACKUP_SIZE})"
+# Refuse to write the CA key out in cleartext unless the operator has said so
+# explicitly. Previously this was a warning, which meant the default invocation
+# of a command advertised as "Backup PKI (encrypted)" silently produced an
+# unencrypted archive on a host-mounted volume.
+if [ -z "$PASSPHRASE_SOURCE" ] || ! command -v gpg >/dev/null 2>&1; then
+    if ! command -v gpg >/dev/null 2>&1; then
+        echo "❌ ERROR: gpg is not available in this image, so the backup cannot be encrypted."
+    else
+        echo "❌ ERROR: no passphrase provided, so the backup cannot be encrypted."
+        echo ""
+        echo "Provide one of:"
+        echo "  GPG_PASSPHRASE_FILE=/run/secrets/ovpn_backup_pass   (preferred)"
+        echo "  GPG_PASSPHRASE=<passphrase>"
+    fi
+    echo ""
+    echo "This archive would contain the CA private key, the server key and every"
+    echo "client key in cleartext. Refusing by default."
+    echo ""
+    echo "If you really want an unencrypted backup, opt in explicitly:"
+    echo "  ALLOW_UNENCRYPTED_BACKUP=1 docker exec openvpn backup-pki"
 
-# Check if GPG is available for encryption
-if ! command -v gpg &> /dev/null; then
+    if [ "${ALLOW_UNENCRYPTED_BACKUP:-0}" != "1" ]; then
+        exit 1
+    fi
+
     echo ""
-    echo "❌ WARNING: gpg is not installed in this image, so this backup is NOT encrypted."
-    echo "   ${BACKUP_FILE} contains the CA private key and every client key in cleartext."
-    echo "   Encrypt it on the host before storing it anywhere:"
-    echo "     gpg --symmetric --cipher-algo AES256 <file>"
-elif [ -n "$GPG_PASSPHRASE" ]; then
-    echo "🔐 Encrypting backup with GPG..."
-    
-    # Encrypt file
-    echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
-        --symmetric --cipher-algo AES256 \
-        "${BACKUP_FILE}"
-    
-    # Remove unencrypted file
-    rm -f "$BACKUP_FILE"
-    
-    ENCRYPTED_FILE="${BACKUP_FILE}.gpg"
-    chmod 600 "$ENCRYPTED_FILE"
-    ENCRYPTED_SIZE=$(du -h "$ENCRYPTED_FILE" | cut -f1)
-    echo "✅ Encrypted backup: $ENCRYPTED_FILE (${ENCRYPTED_SIZE})"
-    echo ""
-    echo "⚠️  IMPORTANT: Store the GPG passphrase securely!"
-    echo "   You'll need it to restore: GPG_PASSPHRASE=xxx docker exec openvpn restore-pki <file>"
+    echo "⚠️  ALLOW_UNENCRYPTED_BACKUP=1 - writing an UNENCRYPTED archive."
+    echo "📦 Creating backup archive..."
+    tar -czf "${BACKUP_FILE}" -C /etc/openvpn pki
+    if [ ! -f "$BACKUP_FILE" ]; then
+        echo "❌ Backup creation failed"
+        exit 1
+    fi
+    chmod 600 "${BACKUP_FILE}"
+    echo "✅ Backup created (UNENCRYPTED): $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+    echo "   Encrypt it before it leaves this host:"
+    echo "     gpg --symmetric --cipher-algo AES256 $(basename "$BACKUP_FILE")"
+    exit 0
+fi
+
+ENCRYPTED_FILE="${BACKUP_FILE}.gpg"
+
+# Stream tar straight into gpg so the cleartext archive never touches the
+# persisted volume. The old flow wrote the plaintext .tar.gz to $BACKUP_DIR,
+# encrypted it, then rm'd it - so the CA key hit a host-mounted directory every
+# run, and `rm` is not a secure erase. Worse, under `set -e` a gpg failure
+# aborted the script before that rm, leaving the plaintext behind.
+# pipefail is required or a tar failure would be masked by gpg's exit status.
+set -o pipefail
+
+# Remove a partial .gpg if anything below fails - a truncated archive that
+# looks like a backup is worse than no backup.
+trap 'rm -f "$ENCRYPTED_FILE"' EXIT
+
+echo "🔐 Creating encrypted backup (passphrase from ${PASSPHRASE_SOURCE})..."
+
+if [ "$PASSPHRASE_SOURCE" = "file" ]; then
+    GPG_PASS_ARGS="--passphrase-file ${GPG_PASSPHRASE_FILE}"
 else
-    echo "⚠️  GPG passphrase not set (GPG_PASSPHRASE env var missing)"
-    echo "   Backup is unencrypted. Consider encrypting it manually:"
-    echo "   gpg --symmetric --cipher-algo AES256 $BACKUP_FILE"
+    GPG_PASS_ARGS="--passphrase-fd 3"
 fi
 
+# s2k hardening: this is a human-chosen passphrase guarding a CA key, so make
+# offline guessing expensive rather than relying on gpg's defaults.
+run_gpg() {
+    gpg --batch --yes --quiet $GPG_PASS_ARGS \
+        --symmetric --cipher-algo AES256 \
+        --s2k-mode 3 --s2k-digest-algo SHA512 --s2k-count 65011712 \
+        --compress-algo none \
+        -o "$ENCRYPTED_FILE"
+}
+
+if [ "$PASSPHRASE_SOURCE" = "file" ]; then
+    tar -czf - -C /etc/openvpn pki | run_gpg
+else
+    # fd 3 rather than argv or a temp file; `printf` is a builtin, so the
+    # passphrase never appears in the process table.
+    tar -czf - -C /etc/openvpn pki | run_gpg 3< <(printf '%s' "$GPG_PASSPHRASE")
+fi
+
+chmod 600 "$ENCRYPTED_FILE"
+
+# A backup that does not decrypt is not a backup. Verify before declaring
+# success, while the passphrase is still to hand.
+echo "🔎 Verifying the archive decrypts and lists..."
+if [ "$PASSPHRASE_SOURCE" = "file" ]; then
+    gpg --batch --quiet --passphrase-file "$GPG_PASSPHRASE_FILE" \
+        -d "$ENCRYPTED_FILE" 2>/dev/null | tar -tzf - >/dev/null
+else
+    gpg --batch --quiet --passphrase-fd 3 \
+        -d "$ENCRYPTED_FILE" 3< <(printf '%s' "$GPG_PASSPHRASE") 2>/dev/null \
+        | tar -tzf - >/dev/null
+fi
+echo "   ✅ verified: decrypts cleanly and the PKI tree is intact"
+
+trap - EXIT
+
+echo "✅ Encrypted backup: $ENCRYPTED_FILE ($(du -h "$ENCRYPTED_FILE" | cut -f1))"
 echo ""
-echo "💡 To restore from backup:"
-echo "   docker cp $BACKUP_FILE openvpn:/tmp/"
-echo "   docker exec openvpn restore-pki /tmp/$(basename $BACKUP_FILE)"
+echo "⚠️  Store the passphrase separately from the backup. Without it this"
+echo "   archive is unrecoverable, and with it, it is the entire VPN."
+echo ""
+echo "💡 To restore, decrypt and unpack over /etc/openvpn:"
+echo "     gpg -d $(basename "$ENCRYPTED_FILE") | tar -xzf - -C /etc/openvpn"

@@ -184,7 +184,7 @@ case "${1:-ovpn_run}" in
         echo "  list-clients           - List all VPN clients"
         echo "  status                 - Check server status"
         echo "  renew-clients <name>   - Renew client certificate"
-        echo "  backup-pki             - Backup PKI (encrypted)"
+        echo "  backup-pki             - Backup PKI (encrypted; set GPG_PASSPHRASE_FILE or GPG_PASSPHRASE)"
         echo ""
         echo "First-time setup:"
         echo "  docker exec openvpn init-pki"
