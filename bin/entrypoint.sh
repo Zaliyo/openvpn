@@ -4,21 +4,20 @@ set -e
 # OpenVPN Server Entrypoint Script
 # Routes to different commands based on arguments
 
-# Set up the NAT and forwarding that VPN clients need to reach the internet.
-# The server config pushes "redirect-gateway def1", so without this clients
-# connect successfully and then have no connectivity at all. Requires
-# NET_ADMIN on the container (see docker-compose.yml).
-configure_vpn_network() {
-    local VPN_NET OUT_IF SERVER_IP NETMASK
+# -----------------------------------------------------------------------------
+# Configure VPN NAT and forwarding
+# -----------------------------------------------------------------------------
 
-    # Derive the VPN subnet from the running config so operator edits to the
-    # `server` directive are picked up instead of silently NATing the wrong net.
+configure_vpn_network() {
+    local VPN_NET OUT_IF SERVER_IP NETMASK PREFIX
+
+    # Derive the VPN subnet from the running configuration so operator edits
+    # to the `server` directive are respected.
     SERVER_IP=$(awk '$1 == "server" { print $2; exit }' /etc/openvpn/openvpn.conf)
     NETMASK=$(awk '$1 == "server" { print $3; exit }' /etc/openvpn/openvpn.conf)
 
     if [ -n "$SERVER_IP" ] && [ -n "$NETMASK" ]; then
-        # Convert OpenVPN's dotted netmask to CIDR notation.
-        # Example: 255.255.255.0 -> 24
+        # Convert dotted netmask to CIDR prefix.
         case "$NETMASK" in
             255.255.255.255) PREFIX=32 ;;
             255.255.255.254) PREFIX=31 ;;
@@ -54,6 +53,8 @@ configure_vpn_network() {
 
         VPN_NET="${SERVER_IP}/${PREFIX}"
     else
+        echo "⚠️  Could not determine VPN subnet from openvpn.conf."
+        echo "   Using default VPN network: 192.168.255.0/24"
         VPN_NET="192.168.255.0/24"
     fi
 
@@ -69,8 +70,9 @@ configure_vpn_network() {
     ')
 
     if [ -z "$OUT_IF" ]; then
-        echo "⚠️  Could not determine the outbound interface - skipping NAT setup."
-        echo "   VPN clients will connect but will not have internet access."
+        echo "⚠️  Could not determine the outbound interface."
+        echo "   Skipping NAT setup."
+        echo "   VPN clients may connect but will not have internet access."
         return 0
     fi
 
@@ -78,26 +80,27 @@ configure_vpn_network() {
     echo "   VPN network : ${VPN_NET}"
     echo "   Outbound IF : ${OUT_IF}"
 
-    # Enable IPv4 forwarding.
-    #
-    # Some container runtimes expose /proc/sys as read-only. If writing fails,
-    # check whether forwarding is already enabled before reporting an error.
+    # -------------------------------------------------------------------------
+    # Enable IPv4 forwarding
+    # -------------------------------------------------------------------------
+
     if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
         if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" = "1" ]; then
             echo "   IP forwarding : already enabled (could not write, value already 1)"
         else
-            echo "⚠️  Could not enable net.ipv4.ip_forward and it is currently off -"
-            echo "   VPN clients will not be routed. Add this to your compose service:"
+            echo "⚠️  Could not enable net.ipv4.ip_forward and it is currently off."
+            echo "   Add this to the Docker Compose service:"
             echo "     sysctls:"
             echo "       - net.ipv4.ip_forward=1"
         fi
+    else
+        echo "   IP forwarding : enabled"
     fi
 
-    # NAT VPN client traffic so Internet hosts can return traffic to the
-    # Docker host/public IP instead of trying to route 192.168.255.0/24.
-    #
-    # -C makes this idempotent. The rule may disappear when the container
-    # network namespace is recreated, so it is checked on every startup.
+    # -------------------------------------------------------------------------
+    # NAT VPN traffic
+    # -------------------------------------------------------------------------
+
     if ! iptables -t nat -C POSTROUTING \
         -s "$VPN_NET" \
         -o "$OUT_IF" \
@@ -109,7 +112,10 @@ configure_vpn_network() {
             -j MASQUERADE
     fi
 
-    # Allow VPN clients to forward traffic to the Internet.
+    # -------------------------------------------------------------------------
+    # Allow VPN -> Internet forwarding
+    # -------------------------------------------------------------------------
+
     if ! iptables -C FORWARD \
         -i tun0 \
         -o "$OUT_IF" \
@@ -121,7 +127,10 @@ configure_vpn_network() {
             -j ACCEPT
     fi
 
-    # Allow return traffic from the Internet back to VPN clients.
+    # -------------------------------------------------------------------------
+    # Allow Internet -> VPN return traffic
+    # -------------------------------------------------------------------------
+
     if ! iptables -C FORWARD \
         -i "$OUT_IF" \
         -o tun0 \
@@ -138,157 +147,308 @@ configure_vpn_network() {
     fi
 }
 
+# -----------------------------------------------------------------------------
+# OpenVPN configuration migration
+# -----------------------------------------------------------------------------
+
+migrate_openvpn_config() {
+    local CONFIG="/etc/openvpn/openvpn.conf"
+
+    if [ ! -f "$CONFIG" ]; then
+        return 0
+    fi
+
+    # -------------------------------------------------------------------------
+    # OpenVPN 2.7 migration:
+    #
+    # topology net30 is deprecated for IPv4 server pools.
+    #
+    # Only replace the exact active directive. Do not overwrite or regenerate
+    # the operator's entire configuration.
+    # -------------------------------------------------------------------------
+
+    if grep -qE \
+        '^[[:space:]]*topology[[:space:]]+net30[[:space:]]*$' \
+        "$CONFIG"; then
+
+        echo "⚙️  Migrating OpenVPN topology: net30 -> subnet"
+
+        sed -i \
+            's/^[[:space:]]*topology[[:space:]]\+net30[[:space:]]*$/topology subnet/' \
+            "$CONFIG"
+
+        echo "✅ OpenVPN topology migrated to subnet."
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# PKI / CRL handling
+# -----------------------------------------------------------------------------
+
+ensure_crl() {
+    local CONFIG="/etc/openvpn/openvpn.conf"
+    local CRL="/etc/openvpn/pki/crl.pem"
+    local crl_reason=""
+
+    # CRL verification is optional in the configuration. If it isn't enabled,
+    # there is nothing to maintain here.
+    if ! grep -qs \
+        '^[[:space:]]*crl-verify[[:space:]]\+' \
+        "$CONFIG"; then
+        return 0
+    fi
+
+    # The CA must exist before EasyRSA can generate a CRL.
+    if [ ! -f "/etc/openvpn/pki/ca.crt" ]; then
+        echo "⚠️  CA certificate is not available; cannot generate CRL."
+        return 0
+    fi
+
+    # -------------------------------------------------------------------------
+    # Detect missing or soon-to-expire CRL.
+    #
+    # OpenVPN rejects new connections when an expired CRL is configured.
+    # Refresh it when it is missing or expires within 30 days.
+    # -------------------------------------------------------------------------
+
+    if [ ! -f "$CRL" ]; then
+        crl_reason="pki/crl.pem is missing"
+
+    elif ! openssl crl \
+        -in "$CRL" \
+        -noout \
+        -checkend 2592000 >/dev/null 2>&1; then
+
+        crl_reason="pki/crl.pem is expired or expires within 30 days"
+    fi
+
+    if [ -z "$crl_reason" ]; then
+        return 0
+    fi
+
+    echo "⚙️  ${crl_reason} - regenerating CRL..."
+
+    if (
+        cd /etc/openvpn/pki
+
+        EASYRSA_PKI=/etc/openvpn/pki \
+        EASYRSA=/usr/local/easyrsa/easyrsa3 \
+        EASYRSA_CRL_DAYS="${EASYRSA_CRL_DAYS:-3650}" \
+        /usr/local/bin/easyrsa --batch gen-crl
+    ); then
+
+        chmod 644 "$CRL"
+
+        echo "✅ CRL regenerated successfully."
+    else
+        echo ""
+        echo "❌ ERROR: Failed to generate CRL."
+        echo "   CRL verification is enabled in openvpn.conf."
+        echo "   OpenVPN will not be started."
+        echo ""
+        exit 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Main command dispatcher
+# -----------------------------------------------------------------------------
+
 case "${1:-ovpn_run}" in
+
+    # =========================================================================
+    # Start OpenVPN
+    # =========================================================================
+
     ovpn_run)
-        # Install a default server config on first-ever startup if none
-        # exists yet. Deployments that only persist a subdirectory of
-        # /etc/openvpn (e.g. its pki/ subfolder) never populate
-        # openvpn.conf themselves, and this image doesn't bake one into
-        # /etc/openvpn directly (that path may be entirely unmounted, or
-        # mounted elsewhere) - so without this, ovpn_run below has no
-        # config to start with. Never overwrites an existing file, so
-        # any customization the operator makes to openvpn.conf persists
-        # across restarts.
+
+        # ---------------------------------------------------------------------
+        # Install default configuration only when none exists.
+        #
+        # Existing configurations are deliberately preserved.
+        # ---------------------------------------------------------------------
+
         if [ ! -f "/etc/openvpn/openvpn.conf" ]; then
-            echo "⚙️  No openvpn.conf found - installing the default configuration..."
+            echo "⚙️  No openvpn.conf found."
+            echo "   Installing default configuration..."
+
             mkdir -p /etc/openvpn
-            cp /usr/local/share/openvpn/openvpn.conf.default /etc/openvpn/openvpn.conf
+
+            cp \
+                /usr/local/share/openvpn/openvpn.conf.default \
+                /etc/openvpn/openvpn.conf
+
+            echo "✅ Default OpenVPN configuration installed."
         fi
 
-        # Auto-initialize PKI on first-ever startup if it doesn't exist yet.
-        # Safe to run on every boot: ovpn_init_pki itself no-ops (and exits 0)
-        # once ca.crt is already present, so restarts are unaffected.
-        if [ ! -f "/etc/openvpn/pki/ca.crt" ] || [ ! -f "/etc/openvpn/pki/issued/server.crt" ]; then
+        # ---------------------------------------------------------------------
+        # Migrate legacy configuration.
+        # ---------------------------------------------------------------------
+
+        migrate_openvpn_config
+
+        # ---------------------------------------------------------------------
+        # Initialize PKI on first startup.
+        # ---------------------------------------------------------------------
+
+        if [ ! -f "/etc/openvpn/pki/ca.crt" ] ||
+           [ ! -f "/etc/openvpn/pki/issued/server.crt" ]; then
+
             echo "⚙️  PKI not found - running first-time initialization..."
             echo ""
 
-            # entrypoint.sh runs with `set -e`; don't let a failed init here
-            # kill the script before we've had a chance to report it below.
-            /usr/local/bin/ovpn_init_pki || true
-
-            if [ ! -f "/etc/openvpn/pki/ca.crt" ] || [ ! -f "/etc/openvpn/pki/issued/server.crt" ]; then
+            if ! /usr/local/bin/ovpn_init_pki; then
                 echo ""
-                echo "❌ ERROR: PKI initialization failed - see the output above."
+                echo "❌ ERROR: PKI initialization failed."
+                echo ""
                 echo "Fix the underlying issue, then either:"
                 echo "  docker exec openvpn init-pki"
-                echo "or restart the container to retry automatically:"
+                echo "or restart the container:"
                 echo "  docker restart openvpn"
                 echo ""
                 echo "⏳ Container waiting - OpenVPN will not start without a PKI."
 
-                # Keep container alive so `docker exec` / logs remain usable.
+                # Keep the container alive so docker exec and logs remain
+                # available for troubleshooting.
                 tail -f /dev/null
             fi
 
             echo ""
             echo "✅ PKI ready - starting OpenVPN server."
-            echo "💡 Create your first client with: docker exec openvpn create-clients alice"
+            echo "💡 Create your first client with:"
+            echo "   docker exec openvpn create-clients alice"
             echo ""
         fi
 
-        # Safety net for PKIs created before openvpn.conf.default gained
-        # `crl-verify`, and for deployments that persist only pki/ while
-        # openvpn.conf is reinstalled fresh each boot: crl-verify on a missing
-        # file is fatal at startup, so seed an empty CRL rather than crash-loop.
-        if grep -qs "^crl-verify" /etc/openvpn/openvpn.conf && [ -f "/etc/openvpn/pki/ca.crt" ]; then
-            crl_reason=""
+        # ---------------------------------------------------------------------
+        # Ensure CRL exists and is valid when crl-verify is configured.
+        # ---------------------------------------------------------------------
 
-            if [ ! -f "/etc/openvpn/pki/crl.pem" ]; then
-                crl_reason="pki/crl.pem is missing"
-            elif ! openssl crl \
-                    -in /etc/openvpn/pki/crl.pem \
-                    -noout \
-                    -checkend 2592000 >/dev/null 2>&1; then
+        ensure_crl
 
-                # Expired, or expiring within 30 days. OpenVPN fails CLOSED on
-                # an expired CRL - it rejects every new connection, not just
-                # revoked ones - so refresh it here rather than let the server
-                # lock everyone out on a date nobody is watching.
-                crl_reason="pki/crl.pem is expired or expires within 30 days"
-            fi
+        # ---------------------------------------------------------------------
+        # Configure VPN forwarding and NAT.
+        # ---------------------------------------------------------------------
 
-            if [ -n "$crl_reason" ]; then
-                echo "⚙️  crl-verify is configured but ${crl_reason} - regenerating..."
-
-                (
-                    cd /etc/openvpn/pki &&
-                    EASYRSA_PKI=/etc/openvpn/pki \
-                    EASYRSA=/usr/local/easyrsa/easyrsa3 \
-                    EASYRSA_CRL_DAYS=3650 \
-                    /usr/local/bin/easyrsa --batch gen-crl
-                ) || true
-
-                chmod 644 /etc/openvpn/pki/crl.pem 2>/dev/null || true
-            fi
-        fi
-
-        # Configure VPN forwarding and NAT before starting OpenVPN.
         configure_vpn_network
 
-        # Start OpenVPN server.
-        exec /usr/local/sbin/openvpn /etc/openvpn/openvpn.conf
+        # ---------------------------------------------------------------------
+        # Start OpenVPN.
+        # ---------------------------------------------------------------------
+
+        echo "🚀 Starting OpenVPN server..."
+
+        exec /usr/local/sbin/openvpn \
+            /etc/openvpn/openvpn.conf
         ;;
+
+    # =========================================================================
+    # EasyRSA
+    # =========================================================================
 
     easyrsa)
-        # EasyRSA commands
         shift
-        /usr/local/bin/easyrsa "$@"
+        exec /usr/local/bin/easyrsa "$@"
         ;;
+
+    # =========================================================================
+    # Create VPN clients
+    # =========================================================================
 
     create-clients)
-        # Create new VPN client
         shift
-        /usr/local/bin/ovpn_create_clients "$@"
+        exec /usr/local/bin/ovpn_create_clients "$@"
         ;;
+
+    # =========================================================================
+    # Revoke VPN clients
+    # =========================================================================
 
     revoke-clients)
-        # Revoke VPN client certificate
         shift
-        /usr/local/bin/ovpn_revoke_clients "$@"
+        exec /usr/local/bin/ovpn_revoke_clients "$@"
         ;;
+
+    # =========================================================================
+    # List VPN clients
+    # =========================================================================
 
     list-clients)
-        # List all VPN clients
-        /usr/local/bin/ovpn_list_clients
+        exec /usr/local/bin/ovpn_list_clients
         ;;
+
+    # =========================================================================
+    # Server status
+    # =========================================================================
 
     status)
-        # Check server status
-        /usr/local/bin/ovpn_status
+        exec /usr/local/bin/ovpn_status
         ;;
+
+    # =========================================================================
+    # Renew VPN client
+    # =========================================================================
 
     renew-clients)
-        # Renew client certificate
         shift
-        /usr/local/bin/ovpn_renew_clients "$@"
+        exec /usr/local/bin/ovpn_renew_clients "$@"
         ;;
+
+    # =========================================================================
+    # Backup PKI
+    # =========================================================================
 
     backup-pki)
-        # Backup PKI (certificates, keys, CRL)
-        /usr/local/bin/ovpn_backup_pki
+        exec /usr/local/bin/ovpn_backup_pki
         ;;
 
+    # =========================================================================
+    # Initialize PKI
+    # =========================================================================
+
     init-pki)
-        # Initialize PKI (first-time setup)
-        /usr/local/bin/ovpn_init_pki
+        exec /usr/local/bin/ovpn_init_pki
         ;;
+
+    # =========================================================================
+    # Unknown command
+    # =========================================================================
 
     *)
         echo "OpenVPN Server - Available commands:"
-        echo "  ovpn_run               - Start OpenVPN server (default)"
-        echo "  init-pki               - Initialize PKI (first-time setup only)"
-        echo "  easyrsa <args>         - EasyRSA PKI management"
-        echo "  create-clients <name>  - Create new VPN client"
-        echo "  revoke-clients <name>  - Revoke a client certificate"
-        echo "  list-clients           - List all VPN clients"
-        echo "  status                 - Check server status"
-        echo "  renew-clients <name>   - Renew client certificate"
-        echo "  backup-pki             - Backup PKI (encrypted; set GPG_PASSPHRASE_FILE or GPG_PASSPHRASE)"
+        echo ""
+        echo "  ovpn_run"
+        echo "      Start OpenVPN server (default)"
+        echo ""
+        echo "  init-pki"
+        echo "      Initialize PKI (first-time setup)"
+        echo ""
+        echo "  easyrsa <args>"
+        echo "      EasyRSA PKI management"
+        echo ""
+        echo "  create-clients <name> [name...]"
+        echo "      Create VPN client certificates"
+        echo ""
+        echo "  revoke-clients <name>"
+        echo "      Revoke a client certificate"
+        echo ""
+        echo "  list-clients"
+        echo "      List VPN clients"
+        echo ""
+        echo "  status"
+        echo "      Check OpenVPN server status"
+        echo ""
+        echo "  renew-clients <name>"
+        echo "      Renew a client certificate"
+        echo ""
+        echo "  backup-pki"
+        echo "      Backup PKI (encrypted; set GPG_PASSPHRASE_FILE"
+        echo "      or GPG_PASSPHRASE)"
         echo ""
         echo "First-time setup:"
         echo "  docker exec openvpn init-pki"
         echo ""
-        echo "Then create clients:"
+        echo "Create clients:"
         echo "  docker exec openvpn create-clients alice"
         echo "  docker exec openvpn create-clients bob charlie"
         echo ""
@@ -296,6 +456,8 @@ case "${1:-ovpn_run}" in
         echo "  docker exec openvpn list-clients"
         echo "  docker exec openvpn revoke-clients baduser"
         echo "  docker exec openvpn status"
+        echo ""
+
         exit 1
         ;;
 esac
